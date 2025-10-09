@@ -43,24 +43,73 @@
         .search-section {
             display: flex;
             gap: 10px;
-            margin-bottom: 20px;
+            align-items: center;
+            flex-wrap: wrap;
         }
 
         .search-input {
             flex: 1;
-            padding: 12px;
-            border: 2px solid #e0e6ed;
-            border-radius: 6px;
+            min-width: 300px;
+            padding: 12px 20px;
             font-size: 16px;
-            transition: border-color 0.3s;
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            transition: all 0.3s ease;
         }
 
         .search-input:focus {
             outline: none;
             border-color: #3498db;
+            box-shadow: 0 0 0 3px rgba(52, 152, 219, 0.1);
         }
-
-        .btn {
+        
+        .navigation-section {
+            display: flex;
+            gap: 15px;
+            align-items: center;
+            justify-content: center;
+            margin-top: 20px;
+            padding: 15px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 12px;
+            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
+        }
+        
+        .btn-nav {
+            padding: 10px 20px;
+            font-size: 14px;
+            font-weight: 600;
+            border: 2px solid white;
+            background: rgba(255, 255, 255, 0.2);
+            color: white;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            backdrop-filter: blur(10px);
+            min-width: 120px;
+        }
+        
+        .btn-nav:hover:not(:disabled) {
+            background: rgba(255, 255, 255, 0.3);
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+        }
+        
+        .btn-nav:disabled {
+            opacity: 0.3;
+            cursor: not-allowed;
+            border-color: rgba(255, 255, 255, 0.3);
+        }
+        
+        .slide-position {
+            font-size: 16px;
+            font-weight: 600;
+            color: white;
+            padding: 0 20px;
+            text-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+            min-width: 150px;
+            text-align: center;
+        }        .btn {
             padding: 12px 24px;
             border: none;
             border-radius: 6px;
@@ -431,6 +480,29 @@
                 >
                 <button @click="loadSlide" class="btn btn-primary">Load Slide</button>
                 <button @click="clearSlide" class="btn btn-secondary">Clear</button>
+            </div>
+            
+            <!-- Navigation Controls -->
+            <div v-if="slideData && currentSlideIndex >= 0" class="navigation-section">
+                <button 
+                    @click="goToPrevious" 
+                    :disabled="!canGoPrevious()"
+                    class="btn btn-nav"
+                    title="Previous slide"
+                >
+                    ◀ Previous
+                </button>
+                <span class="slide-position">
+                    Slide {{ getCurrentPosition() }}
+                </span>
+                <button 
+                    @click="goToNext" 
+                    :disabled="!canGoNext()"
+                    class="btn btn-nav"
+                    title="Next slide"
+                >
+                    Next ▶
+                </button>
             </div>
 
             <div v-if="error" class="alert alert-error">

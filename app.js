@@ -21,6 +21,10 @@ createApp({
             wsiLoading: false,
             viewerZoom: 1.0,
             
+            // Navigation
+            allSlides: [],
+            currentSlideIndex: -1,
+            
             // Configuration - Update these paths to match your setup
             config: {
                 csvPath: 'data.csv',
@@ -51,20 +55,31 @@ createApp({
                 const lines = csvText.split('\n');
                 const headers = lines[0].split(',');
                 
+                // Parse all slides and store them
+                if (this.allSlides.length === 0) {
+                    for (let i = 1; i < lines.length; i++) {
+                        const values = this.parseCSVLine(lines[i]);
+                        if (values.length === headers.length) {
+                            const row = {};
+                            headers.forEach((header, idx) => {
+                                row[header.trim()] = values[idx];
+                            });
+                            if (row.SAMPLE_ACCESSION && row.SAMPLE_ACCESSION.trim()) {
+                                this.allSlides.push(row);
+                            }
+                        }
+                    }
+                }
+                
                 // Find the slide
                 let foundSlide = null;
-                for (let i = 1; i < lines.length; i++) {
-                    const values = this.parseCSVLine(lines[i]);
-                    if (values.length === headers.length) {
-                        const row = {};
-                        headers.forEach((header, idx) => {
-                            row[header.trim()] = values[idx];
-                        });
-                        
-                        if (row.SAMPLE_ACCESSION === this.searchId.trim()) {
-                            foundSlide = row;
-                            break;
-                        }
+                let slideIndex = -1;
+                
+                for (let i = 0; i < this.allSlides.length; i++) {
+                    if (this.allSlides[i].SAMPLE_ACCESSION === this.searchId.trim()) {
+                        foundSlide = this.allSlides[i];
+                        slideIndex = i;
+                        break;
                     }
                 }
 
@@ -72,6 +87,9 @@ createApp({
                     this.error = `Slide ID "${this.searchId}" not found in database`;
                     return;
                 }
+
+                // Store current index
+                this.currentSlideIndex = slideIndex;
 
                 // Convert numeric fields
                 this.slideData = this.convertNumericFields(foundSlide);
@@ -187,12 +205,45 @@ createApp({
             this.thumbnailPath = null;
             this.qcMaskPath = null;
             this.attentionMapPath = null;
+            this.currentSlideIndex = -1;
             
             // Destroy viewer
             if (this.viewer) {
                 this.viewer.destroy();
                 this.viewer = null;
             }
+        },
+        
+        // Navigation methods
+        canGoPrevious() {
+            return this.currentSlideIndex > 0;
+        },
+        
+        canGoNext() {
+            return this.currentSlideIndex >= 0 && this.currentSlideIndex < this.allSlides.length - 1;
+        },
+        
+        goToPrevious() {
+            if (this.canGoPrevious()) {
+                const prevSlide = this.allSlides[this.currentSlideIndex - 1];
+                this.searchId = prevSlide.SAMPLE_ACCESSION;
+                this.loadSlide();
+            }
+        },
+        
+        goToNext() {
+            if (this.canGoNext()) {
+                const nextSlide = this.allSlides[this.currentSlideIndex + 1];
+                this.searchId = nextSlide.SAMPLE_ACCESSION;
+                this.loadSlide();
+            }
+        },
+        
+        getCurrentPosition() {
+            if (this.currentSlideIndex >= 0 && this.allSlides.length > 0) {
+                return `${this.currentSlideIndex + 1} / ${this.allSlides.length}`;
+            }
+            return '';
         },
 
         formatNumber(num) {
@@ -247,15 +298,24 @@ createApp({
                     showNavigationControl: true,
                     navigationControlAnchor: OpenSeadragon.ControlAnchor.TOP_LEFT,
                     
-                    // Performance settings
-                    animationTime: 0.5,
+                    // Performance settings optimized for network storage
+                    animationTime: 0.3,
                     blendTime: 0.1,
                     constrainDuringPan: false,
                     maxZoomPixelRatio: 2,
                     minZoomLevel: 0.5,
-                    visibilityRatio: 1,
+                    visibilityRatio: 0.8,  // Load fewer tiles outside view
                     zoomPerScroll: 1.2,
                     timeout: 120000,
+                    immediateRender: false,
+                    
+                    // Aggressive preloading and caching
+                    preload: true,
+                    imageLoaderLimit: 8,  // Load 8 tiles in parallel
+                    maxImageCacheCount: 300,  // Cache more tiles
+                    
+                    // Reduce tile loading during animation
+                    minPixelRatio: 0.65,  // Lower quality during zoom for faster loading
                     
                     // Interaction settings
                     gestureSettingsMouse: {
@@ -267,11 +327,26 @@ createApp({
                     },
                 });
 
+                // Add event listeners for better feedback
+                this.viewer.addHandler('open', () => {
+                    this.wsiLoading = false;
+                    console.log('Viewer opened successfully');
+                });
+                
+                this.viewer.addHandler('tile-loaded', () => {
+                    // Tiles are loading
+                });
+                
+                this.viewer.addHandler('tile-load-failed', (event) => {
+                    console.warn('Tile load failed:', event);
+                });
+                
                 // Load slide info first
                 fetch(`/slide-info?path=${slidePath}`)
                     .then(response => response.json())
                     .then(info => {
                         console.log('Slide info:', info);
+                        console.log(`Loading ${info.dimensions[0]}x${info.dimensions[1]} slide with ${info.level_count} pyramid levels`);
                         
                         // Now open the DZI
                         this.viewer.open(dziUrl);
@@ -319,5 +394,24 @@ createApp({
     mounted() {
         console.log('Slide Viewer initialized');
         console.log('CSV Path:', this.config.csvPath);
+        
+        // Add keyboard navigation
+        window.addEventListener('keydown', (e) => {
+            // Only trigger if not typing in input field
+            if (e.target.tagName === 'INPUT') return;
+            
+            // Arrow keys for navigation
+            if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+                e.preventDefault();
+                if (this.canGoPrevious()) {
+                    this.goToPrevious();
+                }
+            } else if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+                e.preventDefault();
+                if (this.canGoNext()) {
+                    this.goToNext();
+                }
+            }
+        });
     }
 }).mount('#app');

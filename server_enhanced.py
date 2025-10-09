@@ -29,6 +29,10 @@ from PIL import Image
 dz_cache = {}
 MAX_CACHE_SIZE = 10
 
+# Tile cache for faster repeated access
+tile_cache = {}
+MAX_TILE_CACHE_SIZE = 500  # Cache up to 500 tiles in memory
+
 
 class EnhancedSlideHandler(SimpleHTTPRequestHandler):
     """Enhanced HTTP request handler with DZI support"""
@@ -151,21 +155,37 @@ class EnhancedSlideHandler(SimpleHTTPRequestHandler):
             col = int(match.group(2))
             row = int(match.group(3))
 
-            # Get or create DeepZoomGenerator
-            dz = self.get_deepzoom(slide_path)
+            # Check tile cache first
+            tile_key = f"{slide_path}:{level}:{col}:{row}"
+            global tile_cache
 
-            # Generate tile
-            try:
-                tile_img = dz.get_tile(level, (col, row))
-            except Exception as e:
-                print(f"Error getting tile {level}/{col}_{row}: {e}")
-                # Return blank tile instead of error
-                tile_img = Image.new("RGB", (dz.tile_size, dz.tile_size), color="black")
+            if tile_key in tile_cache:
+                tile_data = tile_cache[tile_key]
+            else:
+                # Get or create DeepZoomGenerator
+                dz = self.get_deepzoom(slide_path)
 
-            # Convert to JPEG
-            buf = io.BytesIO()
-            tile_img.save(buf, "JPEG", quality=90)
-            tile_data = buf.getvalue()
+                # Generate tile
+                try:
+                    tile_img = dz.get_tile(level, (col, row))
+                except Exception as e:
+                    print(f"Error getting tile {level}/{col}_{row}: {e}")
+                    # Return blank tile instead of error
+                    tile_img = Image.new("RGB", (254, 254), color="black")
+
+                # Convert to JPEG with higher compression for network efficiency
+                buf = io.BytesIO()
+                tile_img.save(buf, "JPEG", quality=75, optimize=True)
+                tile_data = buf.getvalue()
+
+                # Cache the tile
+                tile_cache[tile_key] = tile_data
+
+                # Limit cache size
+                if len(tile_cache) > MAX_TILE_CACHE_SIZE:
+                    # Remove oldest entries (simple FIFO)
+                    oldest_key = next(iter(tile_cache))
+                    tile_cache.pop(oldest_key)
 
             self.send_response(200)
             self.send_header("Content-Type", "image/jpeg")
@@ -233,8 +253,9 @@ class EnhancedSlideHandler(SimpleHTTPRequestHandler):
             return dz_cache[cache_key]
 
         # Open slide and create DeepZoomGenerator
+        # Use limit_bounds=True for better performance on network storage
         slide = OpenSlide(slide_path)
-        dz = DeepZoomGenerator(slide, tile_size=254, overlap=1, limit_bounds=False)
+        dz = DeepZoomGenerator(slide, tile_size=254, overlap=1, limit_bounds=True)
 
         # Add to cache
         dz_cache[cache_key] = dz
