@@ -1,0 +1,555 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pathology Slide Viewer</title>
+    <script src="https://cdn.jsdelivr.net/npm/vue@3/dist/vue.global.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: #f5f7fa;
+            color: #2c3e50;
+        }
+
+        #app {
+            max-width: 1800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .header {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+
+        h1 {
+            color: #2c3e50;
+            margin-bottom: 20px;
+            font-size: 28px;
+        }
+
+        .search-section {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+
+        .search-input {
+            flex: 1;
+            padding: 12px;
+            border: 2px solid #e0e6ed;
+            border-radius: 6px;
+            font-size: 16px;
+            transition: border-color 0.3s;
+        }
+
+        .search-input:focus {
+            outline: none;
+            border-color: #3498db;
+        }
+
+        .btn {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 6px;
+            font-size: 16px;
+            cursor: pointer;
+            transition: all 0.3s;
+            font-weight: 500;
+        }
+
+        .btn-primary {
+            background: #3498db;
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: #2980b9;
+        }
+
+        .btn-secondary {
+            background: #95a5a6;
+            color: white;
+        }
+
+        .btn-secondary:hover {
+            background: #7f8c8d;
+        }
+
+        .alert {
+            padding: 12px 20px;
+            border-radius: 6px;
+            margin-bottom: 20px;
+        }
+
+        .alert-error {
+            background: #fee;
+            color: #c33;
+            border: 1px solid #fcc;
+        }
+
+        .alert-info {
+            background: #e3f2fd;
+            color: #1976d2;
+            border: 1px solid #bbdefb;
+        }
+
+        .content-grid {
+            display: grid;
+            gap: 20px;
+        }
+
+        .slide-info {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .info-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-top: 15px;
+        }
+
+        .info-item {
+            padding: 10px;
+            background: #f8f9fa;
+            border-radius: 4px;
+        }
+
+        .info-label {
+            font-size: 12px;
+            color: #6c757d;
+            text-transform: uppercase;
+            margin-bottom: 4px;
+        }
+
+        .info-value {
+            font-size: 16px;
+            font-weight: 600;
+            color: #2c3e50;
+        }
+
+        .images-section {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .section-title {
+            font-size: 20px;
+            font-weight: 600;
+            margin-bottom: 15px;
+            color: #2c3e50;
+        }
+
+        .image-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+            gap: 20px;
+        }
+
+        .image-card {
+            background: #f8f9fa;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+
+        .image-card-header {
+            padding: 12px 15px;
+            background: #34495e;
+            color: white;
+            font-weight: 600;
+        }
+
+        .image-card-body {
+            padding: 15px;
+        }
+
+        .image-container {
+            position: relative;
+            background: #000;
+            border-radius: 4px;
+            overflow: hidden;
+            min-height: 300px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .image-container img {
+            width: 100%;
+            height: auto;
+            display: block;
+        }
+
+        .overlay-controls {
+            display: flex;
+            gap: 10px;
+            margin-top: 10px;
+            flex-wrap: wrap;
+        }
+
+        .toggle-btn {
+            padding: 8px 16px;
+            border: 2px solid #e0e6ed;
+            background: white;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.3s;
+        }
+
+        .toggle-btn:hover {
+            border-color: #3498db;
+            color: #3498db;
+        }
+
+        .toggle-btn.active {
+            background: #3498db;
+            color: white;
+            border-color: #3498db;
+        }
+
+        .opacity-control {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 8px 12px;
+            background: #f8f9fa;
+            border-radius: 4px;
+        }
+
+        .opacity-slider {
+            flex: 1;
+            max-width: 150px;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #95a5a6;
+        }
+
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #3498db;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .no-image {
+            color: #95a5a6;
+            padding: 40px;
+            text-align: center;
+        }
+
+        .metadata-section {
+            margin-top: 20px;
+            padding-top: 20px;
+            border-top: 1px solid #e0e6ed;
+        }
+
+        .metadata-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 12px;
+            margin-top: 12px;
+        }
+
+        .metadata-item {
+            padding: 8px 12px;
+            background: #f8f9fa;
+            border-radius: 4px;
+            border-left: 3px solid #3498db;
+        }
+
+        .metadata-label {
+            font-size: 11px;
+            color: #6c757d;
+            text-transform: uppercase;
+            margin-bottom: 2px;
+        }
+
+        .metadata-value {
+            font-size: 14px;
+            font-weight: 600;
+            color: #2c3e50;
+        }
+
+        .prediction-section {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            border-radius: 8px;
+            margin-top: 15px;
+        }
+
+        .prediction-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+            margin-top: 15px;
+        }
+
+        .prediction-item {
+            background: rgba(255,255,255,0.15);
+            padding: 12px;
+            border-radius: 6px;
+            backdrop-filter: blur(10px);
+        }
+
+        .prediction-label {
+            font-size: 12px;
+            opacity: 0.9;
+            margin-bottom: 4px;
+        }
+
+        .prediction-value {
+            font-size: 20px;
+            font-weight: 700;
+        }
+    </style>
+</head>
+<body>
+    <div id="app">
+        <div class="header">
+            <h1>🔬 Pathology Slide Viewer</h1>
+            
+            <div class="search-section">
+                <input 
+                    v-model="searchId" 
+                    @keyup.enter="loadSlide"
+                    type="text" 
+                    class="search-input" 
+                    placeholder="Enter Sample Accession ID (e.g., BL-13-E28458)"
+                >
+                <button @click="loadSlide" class="btn btn-primary">Load Slide</button>
+                <button @click="clearSlide" class="btn btn-secondary">Clear</button>
+            </div>
+
+            <div v-if="error" class="alert alert-error">
+                {{ error }}
+            </div>
+        </div>
+
+        <div v-if="loading" class="loading">
+            <div class="spinner"></div>
+            <p>Loading slide data...</p>
+        </div>
+
+        <div v-if="slideData && !loading" class="content-grid">
+            <!-- Slide Information -->
+            <div class="slide-info">
+                <div class="section-title">📋 Slide Information</div>
+                <div class="info-grid">
+                    <div class="info-item">
+                        <div class="info-label">Sample ID</div>
+                        <div class="info-value">{{ slideData.SAMPLE_ACCESSION }}</div>
+                    </div>
+                    <div class="info-item">
+                        <div class="info-label">Cancer Type</div>
+                        <div class="info-value">{{ slideData.onco_tree_code_level_2 || 'N/A' }}</div>
+                    </div>
+                    <div class="info-item">
+                        <div class="info-label">Biopsy Site</div>
+                        <div class="info-value">{{ slideData.BIOPSY_SITE || 'N/A' }}</div>
+                    </div>
+                    <div class="info-item">
+                        <div class="info-label">Procedure Date</div>
+                        <div class="info-value">{{ slideData.PROCEDURE_DT || 'N/A' }}</div>
+                    </div>
+                </div>
+
+                <!-- Predictions -->
+                <div v-if="slideData.prediction_successful" class="prediction-section">
+                    <div class="section-title">🎯 Model Predictions</div>
+                    <div class="prediction-grid">
+                        <div v-if="slideData.pred_num_tls !== undefined" class="prediction-item">
+                            <div class="prediction-label">TLS Count</div>
+                            <div class="prediction-value">{{ slideData.pred_num_tls }}</div>
+                        </div>
+                        <div v-if="slideData.pred_num_gc !== undefined" class="prediction-item">
+                            <div class="prediction-label">GC Count</div>
+                            <div class="prediction-value">{{ slideData.pred_num_gc }}</div>
+                        </div>
+                        <div v-if="slideData.predictions !== undefined" class="prediction-item">
+                            <div class="prediction-label">Classification</div>
+                            <div class="prediction-value">{{ slideData.predictions }}</div>
+                        </div>
+                        <div v-if="slideData.confidence !== undefined" class="prediction-item">
+                            <div class="prediction-label">Confidence</div>
+                            <div class="prediction-value">{{ (slideData.confidence * 100).toFixed(1) }}%</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- QC Metadata -->
+                <div class="metadata-section">
+                    <div class="section-title">🔍 Image Quality Metrics</div>
+                    <div class="metadata-grid">
+                        <div class="metadata-item">
+                            <div class="metadata-label">Tissue Share</div>
+                            <div class="metadata-value">{{ (slideData.qc_tissue_share * 100).toFixed(1) }}%</div>
+                        </div>
+                        <div class="metadata-item">
+                            <div class="metadata-label">Background</div>
+                            <div class="metadata-value">{{ (slideData.qc_background_share * 100).toFixed(1) }}%</div>
+                        </div>
+                        <div class="metadata-item">
+                            <div class="metadata-label">Folds</div>
+                            <div class="metadata-value">{{ (slideData.qc_folds_share * 100).toFixed(3) }}%</div>
+                        </div>
+                        <div class="metadata-item">
+                            <div class="metadata-label">Dark Areas</div>
+                            <div class="metadata-value">{{ (slideData.qc_dark_share * 100).toFixed(3) }}%</div>
+                        </div>
+                        <div class="metadata-item">
+                            <div class="metadata-label">Pen Marks</div>
+                            <div class="metadata-value">{{ (slideData.qc_pen_share * 100).toFixed(2) }}%</div>
+                        </div>
+                        <div class="metadata-item">
+                            <div class="metadata-label">Bubbles</div>
+                            <div class="metadata-value">{{ (slideData.qc_bubbles_share * 100).toFixed(4) }}%</div>
+                        </div>
+                        <div class="metadata-item">
+                            <div class="metadata-label">Focus Issues</div>
+                            <div class="metadata-value">{{ (slideData.qc_focus_share * 100).toFixed(3) }}%</div>
+                        </div>
+                        <div class="metadata-item">
+                            <div class="metadata-label">Total Pixels</div>
+                            <div class="metadata-value">{{ formatNumber(slideData.total_pixels) }}</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Images Section -->
+            <div class="images-section">
+                <div class="section-title">🖼️ Slide Images</div>
+                
+                <div class="image-grid">
+                    <!-- Thumbnail -->
+                    <div class="image-card">
+                        <div class="image-card-header">Slide Thumbnail</div>
+                        <div class="image-card-body">
+                            <div class="image-container">
+                                <img v-if="thumbnailPath" :src="thumbnailPath" alt="Slide Thumbnail">
+                                <div v-else class="no-image">Thumbnail not found</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- GrandQC Mask -->
+                    <div class="image-card">
+                        <div class="image-card-header">Quality Control Mask</div>
+                        <div class="image-card-body">
+                            <div class="image-container">
+                                <img v-if="qcMaskPath" :src="qcMaskPath" alt="QC Mask">
+                                <div v-else class="no-image">QC Mask not available</div>
+                            </div>
+                            <div v-if="qcMaskPath" class="overlay-controls">
+                                <div class="opacity-control">
+                                    <label>Opacity:</label>
+                                    <input type="range" min="0" max="100" v-model="qcOpacity" class="opacity-slider">
+                                    <span>{{ qcOpacity }}%</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Attention Map -->
+                    <div class="image-card">
+                        <div class="image-card-header">Attention Map</div>
+                        <div class="image-card-body">
+                            <div class="image-container">
+                                <img v-if="attentionMapPath" :src="attentionMapPath" alt="Attention Map">
+                                <div v-else class="no-image">Attention map not computed</div>
+                            </div>
+                            <div v-if="attentionMapPath" class="overlay-controls">
+                                <button 
+                                    class="toggle-btn"
+                                    :class="{ active: showHeatmap }"
+                                    @click="showHeatmap = !showHeatmap"
+                                >
+                                    {{ showHeatmap ? 'Hide' : 'Show' }} Heatmap
+                                </button>
+                                <div class="opacity-control">
+                                    <label>Opacity:</label>
+                                    <input type="range" min="0" max="100" v-model="attentionOpacity" class="opacity-slider">
+                                    <span>{{ attentionOpacity }}%</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Overlay View -->
+                    <div v-if="thumbnailPath && (qcMaskPath || attentionMapPath)" class="image-card">
+                        <div class="image-card-header">Overlay View</div>
+                        <div class="image-card-body">
+                            <div class="image-container" style="position: relative;">
+                                <img :src="thumbnailPath" alt="Base" style="position: absolute; top: 0; left: 0; width: 100%;">
+                                <img 
+                                    v-if="qcMaskPath && showQcOverlay" 
+                                    :src="qcMaskPath" 
+                                    alt="QC Overlay"
+                                    :style="{ opacity: qcOpacity / 100, position: 'absolute', top: 0, left: 0, width: '100%' }"
+                                >
+                                <img 
+                                    v-if="attentionMapPath && showAttentionOverlay" 
+                                    :src="attentionMapPath" 
+                                    alt="Attention Overlay"
+                                    :style="{ opacity: attentionOpacity / 100, position: 'absolute', top: 0, left: 0, width: '100%' }"
+                                >
+                            </div>
+                            <div class="overlay-controls">
+                                <button 
+                                    v-if="qcMaskPath"
+                                    class="toggle-btn"
+                                    :class="{ active: showQcOverlay }"
+                                    @click="showQcOverlay = !showQcOverlay"
+                                >
+                                    {{ showQcOverlay ? 'Hide' : 'Show' }} QC Mask
+                                </button>
+                                <button 
+                                    v-if="attentionMapPath"
+                                    class="toggle-btn"
+                                    :class="{ active: showAttentionOverlay }"
+                                    @click="showAttentionOverlay = !showAttentionOverlay"
+                                >
+                                    {{ showAttentionOverlay ? 'Hide' : 'Show' }} Attention
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
