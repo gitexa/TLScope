@@ -63,5 +63,14 @@ echo ""
 echo "================================================"
 echo ""
 
-# Start the server
-python3 server.py --port $PORT --dir .
+# Check if OpenSlide is available
+if python3 -c "import openslide" 2>/dev/null; then
+    echo "✅ OpenSlide detected - using enhanced server with WSI support"
+    python3 server_enhanced.py --port $PORT --dir .
+else
+    echo "⚠️  OpenSlide not found - using basic server (no WSI viewing)"
+    echo "   Install OpenSlide for whole slide image viewing:"
+    echo "   pip install openslide-python"
+    echo ""
+    python3 server.py --port $PORT --dir .
+fi

@@ -6,6 +6,7 @@
     <title>Pathology Slide Viewer</title>
     <script src="https://cdn.jsdelivr.net/npm/vue@3/dist/vue.global.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/openseadragon@4.1.0/build/openseadragon/openseadragon.min.js"></script>
     <style>
         * {
             margin: 0;
@@ -332,6 +333,87 @@
             font-size: 20px;
             font-weight: 700;
         }
+
+        /* WSI Viewer Styles */
+        .wsi-viewer-section {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-top: 20px;
+        }
+
+        .wsi-viewer-container {
+            width: 100%;
+            height: 600px;
+            background: #000;
+            border-radius: 8px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .viewer-controls {
+            display: flex;
+            gap: 10px;
+            margin-top: 15px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+
+        .viewer-btn {
+            padding: 8px 16px;
+            border: none;
+            background: #3498db;
+            color: white;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.3s;
+        }
+
+        .viewer-btn:hover {
+            background: #2980b9;
+        }
+
+        .viewer-btn:disabled {
+            background: #95a5a6;
+            cursor: not-allowed;
+        }
+
+        .viewer-info {
+            padding: 8px 12px;
+            background: #f8f9fa;
+            border-radius: 4px;
+            font-size: 14px;
+            color: #6c757d;
+        }
+
+        .wsi-loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            color: white;
+            z-index: 10;
+        }
+
+        .fullscreen-btn {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            z-index: 100;
+            background: rgba(52, 152, 219, 0.9);
+            padding: 10px;
+            border-radius: 4px;
+            cursor: pointer;
+            color: white;
+            font-size: 18px;
+        }
+
+        .fullscreen-btn:hover {
+            background: rgba(41, 128, 185, 0.9);
+        }
     </style>
 </head>
 <body>
@@ -443,6 +525,43 @@
                             <div class="metadata-label">Total Pixels</div>
                             <div class="metadata-value">{{ formatNumber(slideData.total_pixels) }}</div>
                         </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- WSI Viewer Section -->
+            <div v-if="slideData && slideData.FILE_PATH" class="wsi-viewer-section">
+                <div class="section-title">🔬 Whole Slide Image Viewer</div>
+                
+                <div class="wsi-viewer-container">
+                    <div v-if="wsiLoading" class="wsi-loading">
+                        <div class="spinner"></div>
+                        <p>Loading whole slide image...</p>
+                    </div>
+                    <div id="openseadragon-viewer" style="width: 100%; height: 100%;"></div>
+                    <div v-if="viewer" class="fullscreen-btn" @click="toggleFullscreen" title="Toggle Fullscreen">
+                        ⛶
+                    </div>
+                </div>
+
+                <div class="viewer-controls">
+                    <button @click="initViewer" class="viewer-btn" :disabled="wsiLoading">
+                        {{ viewer ? 'Reload Viewer' : 'Load WSI Viewer' }}
+                    </button>
+                    <button v-if="viewer" @click="viewer.viewport.goHome()" class="viewer-btn">
+                        🏠 Reset View
+                    </button>
+                    <button v-if="viewer" @click="viewer.viewport.zoomBy(1.5)" class="viewer-btn">
+                        ➕ Zoom In
+                    </button>
+                    <button v-if="viewer" @click="viewer.viewport.zoomBy(0.67)" class="viewer-btn">
+                        ➖ Zoom Out
+                    </button>
+                    <div class="viewer-info">
+                        <strong>File:</strong> {{ slideData.FILE_PATH ? slideData.FILE_PATH.split('/').pop() : 'N/A' }}
+                    </div>
+                    <div v-if="viewer" class="viewer-info">
+                        <strong>Zoom:</strong> {{ viewerZoom.toFixed(2) }}x
                     </div>
                 </div>
             </div>

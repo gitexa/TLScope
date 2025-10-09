@@ -16,6 +16,11 @@ createApp({
             showQcOverlay: true,
             showAttentionOverlay: false,
             
+            // WSI Viewer
+            viewer: null,
+            wsiLoading: false,
+            viewerZoom: 1.0,
+            
             // Configuration - Update these paths to match your setup
             config: {
                 csvPath: 'data.csv',
@@ -182,11 +187,132 @@ createApp({
             this.thumbnailPath = null;
             this.qcMaskPath = null;
             this.attentionMapPath = null;
+            
+            // Destroy viewer
+            if (this.viewer) {
+                this.viewer.destroy();
+                this.viewer = null;
+            }
         },
 
         formatNumber(num) {
             if (num === undefined || num === null) return 'N/A';
             return num.toLocaleString();
+        },
+
+        // WSI Viewer Methods
+        initViewer() {
+            if (!this.slideData || !this.slideData.FILE_PATH) {
+                alert('No slide path available');
+                return;
+            }
+
+            this.wsiLoading = true;
+
+            // Destroy existing viewer
+            if (this.viewer) {
+                this.viewer.destroy();
+                this.viewer = null;
+            }
+
+            try {
+                // Encode the slide path for URL
+                const slidePath = encodeURIComponent(this.slideData.FILE_PATH);
+                
+                // Build DZI URL
+                const dziUrl = `/dzi/slide.dzi?path=${slidePath}`;
+                
+                console.log('Loading WSI from:', this.slideData.FILE_PATH);
+                console.log('DZI URL:', dziUrl);
+                
+                // Initialize OpenSeadragon viewer
+                this.viewer = OpenSeadragon({
+                    id: "openseadragon-viewer",
+                    prefixUrl: "https://cdn.jsdelivr.net/npm/openseadragon@4.1.0/build/openseadragon/images/",
+                    
+                    // Tile source using our DZI server
+                    tileSources: {
+                        Image: {
+                            xmlns: "http://schemas.microsoft.com/deepzoom/2008",
+                            Url: `/dzi/slide_files/?path=${slidePath}`,
+                            Format: "jpeg",
+                            Overlap: "1",
+                            TileSize: "254"
+                        }
+                    },
+                    
+                    // Viewer settings
+                    showNavigator: true,
+                    navigatorPosition: "BOTTOM_RIGHT",
+                    showNavigationControl: true,
+                    navigationControlAnchor: OpenSeadragon.ControlAnchor.TOP_LEFT,
+                    
+                    // Performance settings
+                    animationTime: 0.5,
+                    blendTime: 0.1,
+                    constrainDuringPan: false,
+                    maxZoomPixelRatio: 2,
+                    minZoomLevel: 0.5,
+                    visibilityRatio: 1,
+                    zoomPerScroll: 1.2,
+                    timeout: 120000,
+                    
+                    // Interaction settings
+                    gestureSettingsMouse: {
+                        scrollToZoom: true,
+                        clickToZoom: false,
+                        dblClickToZoom: true,
+                        pinchToZoom: true,
+                        flickEnabled: true
+                    },
+                });
+
+                // Load slide info first
+                fetch(`/slide-info?path=${slidePath}`)
+                    .then(response => response.json())
+                    .then(info => {
+                        console.log('Slide info:', info);
+                        
+                        // Now open the DZI
+                        this.viewer.open(dziUrl);
+                    })
+                    .catch(error => {
+                        console.error('Error loading slide info:', error);
+                        // Try to open anyway
+                        this.viewer.open(dziUrl);
+                    });
+
+                // Add event listeners
+                this.viewer.addHandler('zoom', (event) => {
+                    this.viewerZoom = event.zoom;
+                });
+
+                this.viewer.addHandler('open', () => {
+                    this.wsiLoading = false;
+                    console.log('WSI loaded successfully');
+                });
+
+                this.viewer.addHandler('open-failed', (event) => {
+                    this.wsiLoading = false;
+                    console.error('Failed to load WSI:', event);
+                    alert('Failed to load whole slide image. Make sure the server has OpenSlide installed and the file path is correct.');
+                });
+
+                this.viewer.addHandler('tile-load-failed', (event) => {
+                    console.error('Tile load failed:', event);
+                });
+
+            } catch (error) {
+                this.wsiLoading = false;
+                console.error('Error initializing viewer:', error);
+                alert('Error initializing viewer: ' + error.message);
+            }
+        },
+
+        toggleFullscreen() {
+            if (!this.viewer) return;
+            
+            this.viewer.setFullScreen(!this.viewer.isFullPage());
         }
     },
 
