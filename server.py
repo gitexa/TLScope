@@ -63,6 +63,11 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             self.serve_attention_map_info(parsed_path)
             return
 
+        # Handle predictions request
+        if path.startswith("/api/predictions"):
+            self.serve_predictions(parsed_path)
+            return
+
         # Translate path to see what file we're looking for
         translated_path = self.translate_path(self.path)
         print(f"   [do_GET] Translated to: {translated_path}")
@@ -118,12 +123,14 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
                 self.send_json({"available": False, "reason": "Attention map folder not found"})
                 return
 
-            candidates = [
-                os.path.join(slide_dir, f"{slide_id}_attention_standard.png"),
-                os.path.join(slide_dir, "plots", "overlay_smoothed.png"),
-                os.path.join(slide_dir, "plots", "attention_map.png"),
-            ]
-            image_path = next((p for p in candidates if os.path.isfile(p)), None)
+            standard_path   = os.path.join(slide_dir, f"{slide_id}_attention_standard.png")
+            smoothed_path   = os.path.join(slide_dir, "plots", "overlay_smoothed.png")
+            unsmoothed_path = os.path.join(slide_dir, "plots", "overlay_unsmoothed.png")
+            fallback_path   = os.path.join(slide_dir, "plots", "attention_map.png")
+
+            image_path          = next((p for p in [standard_path, smoothed_path, fallback_path] if os.path.isfile(p)), None)
+            smoothed_image_path   = smoothed_path   if os.path.isfile(smoothed_path)   else None
+            unsmoothed_image_path = unsmoothed_path if os.path.isfile(unsmoothed_path) else None
 
             metadata = None
             meta_file = os.path.join(slide_dir, "metadata.json")
@@ -134,11 +141,47 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             self.send_json({
                 "available": image_path is not None,
                 "imagePath": image_path,
+                "smoothedImagePath": smoothed_image_path,
+                "unsmoothedImagePath": unsmoothed_image_path,
                 "slideDir": slide_dir,
                 "metadata": metadata,
             })
         except Exception as e:
             print(f"❌ [DEBUG] Error in attention-map info: {e}")
+            self.send_error(500, str(e))
+
+    def serve_predictions(self, parsed_path):
+        """Return predictions row for a specific slide from the predictions CSV"""
+        try:
+            import csv
+            query_params = parse_qs(parsed_path.query)
+            results_base  = unquote(query_params.get("resultsBasePath", [None])[0] or "")
+            experiment    = unquote(query_params.get("experiment",      [None])[0] or "")
+            analysis_dir  = unquote(query_params.get("analysisDir",     [None])[0] or "")
+            pred_file     = unquote(query_params.get("predictionsFile", [None])[0] or "")
+            slide_id      = unquote(query_params.get("slideId",         [None])[0] or "")
+
+            if not all([results_base, experiment, analysis_dir, pred_file, slide_id]):
+                self.send_json({"available": False, "reason": "Missing parameters"})
+                return
+
+            csv_path = os.path.join(results_base, experiment, analysis_dir, "predictions", pred_file)
+            if not os.path.isfile(csv_path):
+                self.send_json({"available": False, "reason": "Predictions file not found", "path": csv_path})
+                return
+
+            with open(csv_path, newline="", encoding="utf-8") as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    # Match on any column that looks like a slide id
+                    for col in ("slide_id", "SAMPLE_ACCESSION", "sample_id", "case"):
+                        if col in row and row[col] == slide_id:
+                            self.send_json({"available": True, "predictions": dict(row)})
+                            return
+
+            self.send_json({"available": False, "reason": "Slide not found in predictions"})
+        except Exception as e:
+            print(f"❌ [DEBUG] Error in predictions: {e}")
             self.send_error(500, str(e))
 
     def send_json(self, data):

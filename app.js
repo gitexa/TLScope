@@ -34,6 +34,8 @@ createApp({
             attentionMapInfo: null,
             attentionMapLoading: false,
             showExperimentSection: false,
+            experimentPredictions: null,
+            experimentPredictionsLoading: false,
 
             // Cancer type filtering
             selectedCancerType: '',
@@ -88,6 +90,7 @@ createApp({
             this.selectedExperiment = '';
             this.availableExperiments = [];
             this.attentionMapInfo = null;
+            this.experimentPredictions = null;
             console.log('Dataset changed to:', this.selectedDataset);
             this.loadAvailableExperiments();
             // Pre-load the CSV so the sample ID dropdown is immediately available
@@ -153,6 +156,7 @@ createApp({
             console.log('Experiment changed to:', this.selectedExperiment);
             if (this.slideData) {
                 this.loadAttentionMapInfo();
+                this.loadExperimentPredictions();
             }
         },
 
@@ -191,7 +195,40 @@ createApp({
                 this.attentionMapLoading = false;
             }
         },
-        
+
+        async loadExperimentPredictions() {
+            const datasetConfig = this.currentDatasetConfig;
+            if (!datasetConfig.resultsBasePath || !datasetConfig.predictionsFile || !this.slideData) {
+                this.experimentPredictions = null;
+                return;
+            }
+            const sampleIdKey = datasetConfig.columnMapping.sampleId;
+            const slideId = this.slideData[sampleIdKey] || '';
+            const experiment = this.selectedExperiment || datasetConfig.defaultExperiment || '';
+            const analysisDir = datasetConfig.analysisDir || '';
+
+            this.experimentPredictionsLoading = true;
+            this.experimentPredictions = null;
+            try {
+                const params = new URLSearchParams({
+                    resultsBasePath: datasetConfig.resultsBasePath,
+                    experiment,
+                    analysisDir,
+                    predictionsFile: datasetConfig.predictionsFile,
+                    slideId,
+                });
+                const response = await fetch(`/api/predictions?${params}`);
+                if (response.ok) {
+                    this.experimentPredictions = await response.json();
+                }
+            } catch (err) {
+                console.warn('Could not load predictions:', err.message);
+                this.experimentPredictions = { available: false, reason: err.message };
+            } finally {
+                this.experimentPredictionsLoading = false;
+            }
+        },
+
         onCancerTypeChange() {
             // Reset current slide when cancer type filter changes
             this.currentSlideIndex = -1;
@@ -311,6 +348,7 @@ createApp({
                 console.log('Loading images for sample ID:', sampleId);
                 this.loadImagePaths(sampleId);
                 this.loadAttentionMapInfo();
+                this.loadExperimentPredictions();
                 
             } catch (err) {
                 this.error = `Error loading slide data: ${err.message}`;

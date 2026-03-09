@@ -53,6 +53,7 @@ const CONFIG = {
             resultsBasePath: '/mnt/disks/ahaas-persistent-std-tcga/results',
             analysisDir: 'analysis_tcga_id_test',
             defaultExperiment: 'v4.0_reg_tls',
+            predictionsFile: 'tcga_id_test_results.csv',
 
             columnMapping: {
                 sampleId: 'slide_id',
@@ -87,6 +88,7 @@ const CONFIG = {
             resultsBasePath: '/mnt/disks/ahaas-persistent-std-tcga/results',
             analysisDir: 'analysis_tcga_ood_test',
             defaultExperiment: 'v4.0_reg_tls',
+            predictionsFile: 'tcga_ood_test_results.csv',
 
             columnMapping: {
                 sampleId: 'slide_id',
@@ -119,9 +121,10 @@ const CONFIG = {
             thumbnailBasePath: '/mnt/disks/ahaas-persistent-std-profile/data/preprocessing',
             qcMaskBasePath: '/path/to/profile_reader_study/qc_masks',          // TODO
 
-            resultsBasePath: '/path/to/profile_reader_study/results',           // TODO
-            analysisDir: 'analysis_profile_reader_study',                       // TODO
-            defaultExperiment: 'v1.0',                                          // TODO
+            resultsBasePath: '/mnt/disks/ahaas-persistent-std-tcga/results',
+            analysisDir: 'analysis_profile_reader_study',
+            defaultExperiment: 'v4.0_reg_tls',
+            predictionsFile: 'profile_results_readerstudy.csv',
 
             columnMapping: {
                 sampleId: 'SAMPLE_ACCESSION',
@@ -158,6 +161,7 @@ const CONFIG = {
             resultsBasePath: '/path/to/profile/results',                        // TODO
             analysisDir: 'analysis_profile',                                    // TODO
             defaultExperiment: 'v1.0',                                          // TODO
+            predictionsFile: 'profile_results.csv',
 
             columnMapping: {
                 sampleId: 'SAMPLE_ACCESSION',
@@ -194,6 +198,7 @@ const CONFIG = {
             resultsBasePath: '/path/to/cm_25/results',                          // TODO
             analysisDir: 'analysis_cm_25',                                      // TODO
             defaultExperiment: 'v1.0',                                          // TODO
+            predictionsFile: 'checkmate_025_results.csv',
 
             columnMapping: {
                 sampleId: 'sample_id',                                          // TODO
@@ -231,6 +236,7 @@ const CONFIG = {
             resultsBasePath: '/path/to/cm_214/results',                         // TODO
             analysisDir: 'analysis_cm_214',                                     // TODO
             defaultExperiment: 'v1.0',                                          // TODO
+            predictionsFile: 'checkmate_214_results.csv',                       // TODO: confirm filename
 
             columnMapping: {
                 sampleId: 'sample_id',                                          // TODO

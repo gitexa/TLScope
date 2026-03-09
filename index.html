@@ -667,8 +667,20 @@
             align-items: start;
         }
 
+        .attention-images-row {
+            display: flex;
+            gap: 16px;
+            flex-wrap: wrap;
+        }
+
+        .attention-images-row .attention-image-card {
+            flex: 1 1 0;
+            min-width: 0;
+        }
+
         @media (max-width: 900px) {
             .attention-results { grid-template-columns: 1fr; }
+            .attention-images-row { flex-direction: column; }
         }
 
         .attention-image-card, .attention-meta-card {
@@ -714,6 +726,36 @@
 
         .attention-meta-label { color: #6b7280; font-weight: 500; }
         .attention-meta-value { color: #1a1a2e; font-weight: 600; font-variant-numeric: tabular-nums; }
+
+        /* Experiment predictions grid */
+        .exp-pred-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+            gap: 8px;
+        }
+
+        .exp-pred-item {
+            padding: 10px 12px;
+            background: #f5f3ff;
+            border: 1px solid #e0e7ff;
+            border-radius: 8px;
+        }
+
+        .exp-pred-label {
+            font-size: 10px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: #6366f1;
+            margin-bottom: 3px;
+        }
+
+        .exp-pred-value {
+            font-size: 14px;
+            font-weight: 600;
+            color: #1a1a2e;
+            word-break: break-all;
+        }
     </style>
 </head>
 <body>
@@ -1104,10 +1146,24 @@
 
                     <!-- Available: show image + metadata -->
                     <div v-else-if="attentionMapInfo && attentionMapInfo.available" class="attention-results">
-                        <div class="attention-image-card">
-                            <div class="attention-image-header">Attention Map — {{ selectedExperiment }}</div>
-                            <div class="attention-image-body">
-                                <img :src="attentionMapInfo.imagePath" alt="Attention Map" class="attention-img">
+                        <div class="attention-images-row">
+                            <div v-if="attentionMapInfo.smoothedImagePath" class="attention-image-card">
+                                <div class="attention-image-header">Smoothed — {{ selectedExperiment }}</div>
+                                <div class="attention-image-body">
+                                    <img :src="attentionMapInfo.smoothedImagePath" alt="Smoothed Attention Map" class="attention-img">
+                                </div>
+                            </div>
+                            <div v-if="attentionMapInfo.unsmoothedImagePath" class="attention-image-card">
+                                <div class="attention-image-header">Unsmoothed — {{ selectedExperiment }}</div>
+                                <div class="attention-image-body">
+                                    <img :src="attentionMapInfo.unsmoothedImagePath" alt="Unsmoothed Attention Map" class="attention-img">
+                                </div>
+                            </div>
+                            <div v-if="!attentionMapInfo.smoothedImagePath && !attentionMapInfo.unsmoothedImagePath" class="attention-image-card">
+                                <div class="attention-image-header">Attention Map — {{ selectedExperiment }}</div>
+                                <div class="attention-image-body">
+                                    <img :src="attentionMapInfo.imagePath" alt="Attention Map" class="attention-img">
+                                </div>
                             </div>
                         </div>
 
@@ -1158,13 +1214,32 @@
                             </div>
                         </div>
                     </div>
+                    <!-- Experiment Predictions -->
+                    <div class="experiment-predictions" style="margin-top: 16px;">
+                        <div v-if="experimentPredictionsLoading" style="color: #6b7280; font-size: 13px;">Loading predictions…</div>
+                        <div v-else-if="experimentPredictions && !experimentPredictions.available" style="color: #9ca3af; font-size: 13px;">
+                            Predictions not available: {{ experimentPredictions.reason }}
+                        </div>
+                        <div v-else-if="experimentPredictions && experimentPredictions.available">
+                            <div class="section-title" style="margin-bottom: 10px;">Experiment Predictions</div>
+                            <div class="exp-pred-grid">
+                                <template v-for="(val, key) in experimentPredictions.predictions" :key="key">
+                                    <div class="exp-pred-item" v-if="val !== '' && val !== null">
+                                        <div class="exp-pred-label">{{ key }}</div>
+                                        <div class="exp-pred-value">{{ val }}</div>
+                                    </div>
+                                </template>
+                            </div>
+                        </div>
+                    </div>
+
                 </div><!-- end experiment-section-body -->
             </div>
 
         </div>
     </div>
 
-    <script src="config.js?v=20260309f"></script>
-    <script src="app.js?v=20260309f"></script>
+    <script src="config.js?v=20260309g"></script>
+    <script src="app.js?v=20260309g"></script>
 </body>
 </html>
