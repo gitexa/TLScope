@@ -9,7 +9,6 @@ createApp({
             error: null,
             thumbnailPath: null,
             qcMaskPath: null,
-            attentionMapPath: null,
             qcOpacity: 50,
             attentionOpacity: 70,
             showHeatmap: true,
@@ -25,17 +24,199 @@ createApp({
             allSlides: [],
             currentSlideIndex: -1,
             
-            // Configuration - Update these paths to match your setup
-            config: {
-                csvPath: 'data.csv',
-                thumbnailBasePath: 'images',
-                qcMaskBasePath: 'images',
-                attentionMapBasePath: 'images'
-            }
+            // Dataset selection
+            selectedDataset: CONFIG.defaultDataset,
+            availableDatasets: Object.keys(CONFIG.datasets),
+
+            // Experiment selection (for datasets that support it)
+            selectedExperiment: '',
+            availableExperiments: [],
+            attentionMapInfo: null,
+            attentionMapLoading: false,
+            showExperimentSection: false,
+
+            // Cancer type filtering
+            selectedCancerType: '',
+            availableCancerTypes: [],
+            
+            // QC Mask visualization
+            qcMaskStats: null,
+            showQcLegend: CONFIG.qcMask.showLegendByDefault,
+            showQcStats: CONFIG.qcMask.showStatsByDefault,
+            qcPieChart: null,
+            
+            // Configuration - loaded from config.js
+            config: CONFIG
         }
     },
     
+    computed: {
+        currentDatasetConfig() {
+            return this.config.datasets[this.selectedDataset];
+        },
+
+        filteredSlides() {
+            if (!this.selectedCancerType) {
+                return this.allSlides;
+            }
+            const cancerTypeKey = this.currentDatasetConfig.columnMapping.cancerType;
+            return this.allSlides.filter(slide => slide[cancerTypeKey] === this.selectedCancerType);
+        },
+
+        // Whether the current dataset has a prepopulated ID list (i.e. CSV already loaded)
+        hasSampleIdList() {
+            const cfg = this.currentDatasetConfig;
+            return this.allSlides.length > 0 && !!(cfg.resultsBasePath || cfg.prepopulateIds);
+        },
+
+        sampleIdOptions() {
+            if (!this.hasSampleIdList) return [];
+            const key = this.currentDatasetConfig.columnMapping.sampleId;
+            return this.filteredSlides.map(s => s[key]).filter(Boolean);
+        },
+    },
+    
     methods: {
+        onDatasetChange() {
+            this.allSlides = [];
+            this.currentSlideIndex = -1;
+            this.slideData = null;
+            this.error = null;
+            this.searchId = '';
+            this.selectedCancerType = '';
+            this.availableCancerTypes = [];
+            this.selectedExperiment = '';
+            this.availableExperiments = [];
+            this.attentionMapInfo = null;
+            console.log('Dataset changed to:', this.selectedDataset);
+            this.loadAvailableExperiments();
+            // Pre-load the CSV so the sample ID dropdown is immediately available
+            if (this.currentDatasetConfig.resultsBasePath || this.currentDatasetConfig.prepopulateIds) {
+                this.preloadSlideList();
+            }
+        },
+
+        async preloadSlideList() {
+            if (this.allSlides.length > 0) return;
+            try {
+                const datasetConfig = this.currentDatasetConfig;
+                const sampleIdKey = datasetConfig.columnMapping.sampleId;
+                const response = await fetch(datasetConfig.csvPath);
+                if (!response.ok) return;
+                const csvText = await response.text();
+                const lines = csvText.split('\n');
+                const headers = this.parseCSVLine(lines[0]);
+                for (let i = 1; i < lines.length; i++) {
+                    if (!lines[i].trim()) continue;
+                    const values = this.parseCSVLine(lines[i]);
+                    if (values.length !== headers.length) continue;
+                    const row = {};
+                    headers.forEach((h, idx) => { row[h.trim()] = values[idx]; });
+                    if (row[sampleIdKey]?.trim()) this.allSlides.push(row);
+                }
+                this.extractCancerTypes();
+                console.log('Pre-loaded', this.allSlides.length, 'slides for dropdown');
+            } catch (err) {
+                console.warn('Could not pre-load slide list:', err.message);
+            }
+        },
+
+        onSampleIdSelect(event) {
+            this.searchId = event.target.value;
+            if (this.searchId) this.loadSlide();
+        },
+
+        async loadAvailableExperiments() {
+            const datasetConfig = this.currentDatasetConfig;
+            if (!datasetConfig.resultsBasePath) {
+                return; // Dataset doesn't support experiment selection
+            }
+            try {
+                const response = await fetch(`/api/list-experiments?resultsBasePath=${encodeURIComponent(datasetConfig.resultsBasePath)}`);
+                if (response.ok) {
+                    const data = await response.json();
+                    this.availableExperiments = data.experiments || [];
+                    // Set default experiment
+                    if (datasetConfig.defaultExperiment && this.availableExperiments.includes(datasetConfig.defaultExperiment)) {
+                        this.selectedExperiment = datasetConfig.defaultExperiment;
+                    } else if (this.availableExperiments.length > 0) {
+                        this.selectedExperiment = this.availableExperiments[0];
+                    }
+                    console.log('Available experiments:', this.availableExperiments);
+                }
+            } catch (err) {
+                console.warn('Could not load experiments:', err.message);
+            }
+        },
+
+        onExperimentChange() {
+            console.log('Experiment changed to:', this.selectedExperiment);
+            if (this.slideData) {
+                this.loadAttentionMapInfo();
+            }
+        },
+
+        async loadAttentionMapInfo() {
+            const datasetConfig = this.currentDatasetConfig;
+            if (!datasetConfig.resultsBasePath || !this.slideData) {
+                this.attentionMapInfo = null;
+                return;
+            }
+            const cancerTypeKey = datasetConfig.columnMapping.cancerType;
+            const sampleIdKey = datasetConfig.columnMapping.sampleId;
+            const cancerType = this.slideData[cancerTypeKey] || '';
+            const slideId = this.slideData[sampleIdKey] || '';
+            const experiment = this.selectedExperiment || datasetConfig.defaultExperiment || '';
+            const analysisDir = datasetConfig.analysisDir || '';
+
+            this.attentionMapLoading = true;
+            this.attentionMapInfo = null;
+            try {
+                const params = new URLSearchParams({
+                    resultsBasePath: datasetConfig.resultsBasePath,
+                    experiment,
+                    analysisDir,
+                    cancerType,
+                    slideId,
+                });
+                const response = await fetch(`/api/attention-map?${params}`);
+                if (response.ok) {
+                    this.attentionMapInfo = await response.json();
+                    console.log('Attention map info:', this.attentionMapInfo);
+                }
+            } catch (err) {
+                console.warn('Could not load attention map info:', err.message);
+                this.attentionMapInfo = { available: false, reason: err.message };
+            } finally {
+                this.attentionMapLoading = false;
+            }
+        },
+        
+        onCancerTypeChange() {
+            // Reset current slide when cancer type filter changes
+            this.currentSlideIndex = -1;
+            this.slideData = null;
+            this.searchId = '';
+            console.log('Cancer type filter changed to:', this.selectedCancerType || 'All');
+        },
+        
+        extractCancerTypes() {
+            // Extract unique cancer types from all slides
+            const cancerTypeKey = this.currentDatasetConfig.columnMapping.cancerType;
+            const cancerTypesSet = new Set();
+            
+            this.allSlides.forEach(slide => {
+                const cancerType = slide[cancerTypeKey];
+                if (cancerType !== undefined && cancerType !== null && cancerType !== '') {
+                    cancerTypesSet.add(cancerType);
+                }
+            });
+            
+            // Convert to sorted array
+            this.availableCancerTypes = Array.from(cancerTypesSet).sort();
+            console.log('Found cancer types:', this.availableCancerTypes);
+        },
+        
         async loadSlide() {
             if (!this.searchId.trim()) {
                 this.error = 'Please enter a Sample Accession ID';
@@ -47,37 +228,68 @@ createApp({
             this.slideData = null;
 
             try {
+                const datasetConfig = this.currentDatasetConfig;
+                const sampleIdKey = datasetConfig.columnMapping.sampleId;
+                
+                console.log('Loading slide from dataset:', this.selectedDataset);
+                console.log('CSV path:', datasetConfig.csvPath);
+                console.log('Sample ID key:', sampleIdKey);
+                
                 // Load CSV data
-                const response = await fetch(this.config.csvPath);
+                const response = await fetch(datasetConfig.csvPath);
                 const csvText = await response.text();
                 
                 // Parse CSV
                 const lines = csvText.split('\n');
-                const headers = lines[0].split(',');
+                const headers = this.parseCSVLine(lines[0]);
                 
                 // Parse all slides and store them
                 if (this.allSlides.length === 0) {
+                    let skippedRows = 0;
                     for (let i = 1; i < lines.length; i++) {
+                        // Skip empty lines
+                        if (!lines[i].trim()) {
+                            continue;
+                        }
+                        
                         const values = this.parseCSVLine(lines[i]);
-                        if (values.length === headers.length) {
-                            const row = {};
-                            headers.forEach((header, idx) => {
-                                row[header.trim()] = values[idx];
-                            });
-                            if (row.SAMPLE_ACCESSION && row.SAMPLE_ACCESSION.trim()) {
-                                this.allSlides.push(row);
+                        
+                        // Log mismatches for debugging
+                        if (values.length !== headers.length) {
+                            skippedRows++;
+                            if (skippedRows <= 5) {
+                                console.warn(`Row ${i} column count mismatch: expected ${headers.length}, got ${values.length}`);
                             }
+                            continue;
+                        }
+                        
+                        const row = {};
+                        headers.forEach((header, idx) => {
+                            row[header.trim()] = values[idx];
+                        });
+                        
+                        if (row[sampleIdKey] && row[sampleIdKey].trim()) {
+                            this.allSlides.push(row);
                         }
                     }
+                    console.log('Loaded', this.allSlides.length, 'slides from CSV');
+                    if (skippedRows > 0) {
+                        console.warn(`Skipped ${skippedRows} rows due to column count mismatch`);
+                    }
+                    
+                    // Extract available cancer types from loaded data
+                    this.extractCancerTypes();
                 }
                 
-                // Find the slide
+                // Find the slide using the dynamic sample ID key
+                // Search in filtered slides if cancer type filter is active
+                const slidesToSearch = this.filteredSlides;
                 let foundSlide = null;
                 let slideIndex = -1;
                 
-                for (let i = 0; i < this.allSlides.length; i++) {
-                    if (this.allSlides[i].SAMPLE_ACCESSION === this.searchId.trim()) {
-                        foundSlide = this.allSlides[i];
+                for (let i = 0; i < slidesToSearch.length; i++) {
+                    if (slidesToSearch[i][sampleIdKey] === this.searchId.trim()) {
+                        foundSlide = slidesToSearch[i];
                         slideIndex = i;
                         break;
                     }
@@ -94,8 +306,11 @@ createApp({
                 // Convert numeric fields
                 this.slideData = this.convertNumericFields(foundSlide);
                 
-                // Load image paths
-                this.loadImagePaths(this.slideData.SAMPLE_ACCESSION);
+                // Load image paths using the dynamic sample ID key
+                const sampleId = this.slideData[sampleIdKey];
+                console.log('Loading images for sample ID:', sampleId);
+                this.loadImagePaths(sampleId);
+                this.loadAttentionMapInfo();
                 
             } catch (err) {
                 this.error = `Error loading slide data: ${err.message}`;
@@ -133,7 +348,10 @@ createApp({
                 'qc_dark_share', 'qc_pen_share', 'qc_bubbles_share', 'qc_focus_share',
                 'total_pixels', 'qc_tissue_sum', 'qc_background_sum',
                 'pred_num_tls', 'pred_num_gc', 'pred_num_tls_raw', 'pred_num_gc_raw',
-                'predictions', 'confidence', 'confidence_class_0', 'confidence_class_1'
+                'predictions', 'confidence', 'confidence_class_0', 'confidence_class_1',
+                'pred', 'pred_raw',
+                'TLS_count_BS', 'TLS_count_GR', 'TLS_count_consensus',
+                'GC_BS', 'GC_GR', 'GC_consensus'
             ];
 
             const converted = { ...data };
@@ -150,38 +368,52 @@ createApp({
         },
 
         loadImagePaths(sampleId) {
-            // Try to load thumbnail (GrandQC format: BL-13-E42518.svs.jpg)
-            const thumbnailPossiblePaths = [
-                `${this.config.thumbnailBasePath}/${sampleId}.svs.jpg`,
-                `${this.config.thumbnailBasePath}/${sampleId}.jpg`,
-                `${this.config.thumbnailBasePath}/${sampleId}.png`,
-            ];
+            const datasetConfig = this.currentDatasetConfig;
             
+            // Derive thumbnail path from MASK_PATH if available
+            const maskPathKey = datasetConfig.columnMapping.maskPath;
+            let thumbnailPossiblePaths = [];
+            
+            if (maskPathKey && this.slideData[maskPathKey]) {
+                // Extract thumbnail path from mask path: .svs_mask.png -> .svs.jpg
+                const maskPath = this.slideData[maskPathKey];
+                const thumbnailPath = maskPath.replace('.svs_mask.png', '.svs.jpg');
+                thumbnailPossiblePaths.push(thumbnailPath);
+                console.log('Derived thumbnail path from MASK_PATH:', thumbnailPath);
+            }
+            
+            // Fallback to pattern-based paths
+            thumbnailPossiblePaths.push(...datasetConfig.imagePatterns.thumbnail.map(pattern =>
+                pattern.replace('{basePath}', datasetConfig.thumbnailBasePath)
+                       .replace('{sampleId}', sampleId)
+            ));
+            
+            console.log('Checking thumbnail paths:', thumbnailPossiblePaths);
             this.checkImageExists(thumbnailPossiblePaths).then(path => {
                 this.thumbnailPath = path;
+                console.log('Thumbnail path:', path || 'not found');
             });
 
-            // Try to load QC mask (GrandQC format: BL-13-E42518.svs_map_QC.png)
-            const qcMaskPossiblePaths = [
-                `${this.config.qcMaskBasePath}/${sampleId}.svs_map_QC.png`,
-                `${this.config.qcMaskBasePath}/${sampleId}.svs_MASK_COL.png`,
-                `${this.config.qcMaskBasePath}/${sampleId}_qc_mask.png`,
-            ];
+            // Try to load QC mask
+            const qcMaskPossiblePaths = datasetConfig.imagePatterns.qcMask.map(pattern =>
+                pattern.replace('{basePath}', datasetConfig.qcMaskBasePath)
+                       .replace('{sampleId}', sampleId)
+            );
             
+            console.log('Checking QC mask paths:', qcMaskPossiblePaths);
             this.checkImageExists(qcMaskPossiblePaths).then(path => {
                 this.qcMaskPath = path;
+                console.log('QC mask path:', path || 'not found');
+                
+                // If found, render to canvas with colorization
+                if (path) {
+                    this.renderQcMaskToCanvas(path).catch(error => {
+                        console.error('Failed to render QC mask:', error);
+                    });
+                }
             });
 
-            // Try to load attention map or overlay (GrandQC format: BL-13-E42518.svs_overlay_QC.jpg)
-            const attentionMapPossiblePaths = [
-                `${this.config.attentionMapBasePath}/${sampleId}.svs_overlay_QC.jpg`,
-                `${this.config.attentionMapBasePath}/${sampleId}.svs_OVERLAY.jpg`,
-                `${this.config.attentionMapBasePath}/${sampleId}_attention.png`,
-            ];
-            
-            this.checkImageExists(attentionMapPossiblePaths).then(path => {
-                this.attentionMapPath = path;
-            });
+            // Attention map is loaded separately via loadAttentionMapInfo (experiment-dependent)
         },
 
         async checkImageExists(paths) {
@@ -197,6 +429,187 @@ createApp({
             }
             return null;
         },
+        
+        // QC Mask colorization methods
+        async renderQcMaskToCanvas(imagePath) {
+            console.log('Rendering QC mask to canvas:', imagePath);
+
+            try {
+                // Fetch PNG as raw bytes to bypass browser color management
+                const response = await fetch(imagePath);
+                if (!response.ok) throw new Error(`Failed to fetch mask: ${response.status}`);
+                const blob = await response.blob();
+
+                // createImageBitmap with colorSpaceConversion:'none' preserves raw pixel values
+                const bitmap = await createImageBitmap(blob, { colorSpaceConversion: 'none' });
+
+                const canvas = document.getElementById('qcMaskCanvas');
+                if (!canvas) throw new Error('Canvas element not found');
+
+                canvas.width = bitmap.width;
+                canvas.height = bitmap.height;
+
+                // Use willReadFrequently hint for performance
+                const ctx = canvas.getContext('2d', { willReadFrequently: true });
+                ctx.drawImage(bitmap, 0, 0);
+                bitmap.close();
+
+                const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                const data = imageData.data;
+
+                // Initialize pixel counters
+                const stats = {};
+                for (let i = 1; i <= 7; i++) {
+                    stats[i] = { count: 0, percentage: 0 };
+                }
+
+                const totalPixels = canvas.width * canvas.height;
+
+                // Pre-build color lookup table to avoid repeated hex parsing
+                const colorLut = {};
+                for (let v = 1; v <= 7; v++) {
+                    const cat = this.config.qcMask.categories[v];
+                    colorLut[v] = cat ? this.hexToRgb(cat.color) : null;
+                }
+
+                for (let i = 0; i < data.length; i += 4) {
+                    // Grayscale PNG drawn to canvas: R=G=B=original_value
+                    // Use red channel as the mask category value
+                    const value = data[i];
+
+                    if (value >= 1 && value <= 7 && colorLut[value]) {
+                        stats[value].count++;
+                        const c = colorLut[value];
+                        data[i]     = c.r;
+                        data[i + 1] = c.g;
+                        data[i + 2] = c.b;
+                        data[i + 3] = 255;
+                    } else {
+                        data[i + 3] = 0; // transparent for value 0 / unknown
+                    }
+                }
+
+                // Calculate percentages
+                for (let i = 1; i <= 7; i++) {
+                    stats[i].percentage = (stats[i].count / totalPixels) * 100;
+                }
+
+                this.qcMaskStats = stats;
+                console.log('QC Mask stats:', stats);
+
+                ctx.putImageData(imageData, 0, 0);
+
+                this.$nextTick(() => {
+                    if (this.showQcStats) {
+                        this.renderQcPieChart();
+                    }
+                });
+            } catch (error) {
+                console.error('Error processing QC mask:', error);
+                throw error;
+            }
+        },
+        
+        hexToRgb(hex) {
+            // Convert hex color to RGB
+            const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+            return result ? {
+                r: parseInt(result[1], 16),
+                g: parseInt(result[2], 16),
+                b: parseInt(result[3], 16)
+            } : { r: 0, g: 0, b: 0 };
+        },
+        
+        toggleQcLegend() {
+            this.showQcLegend = !this.showQcLegend;
+        },
+        
+        toggleQcStats() {
+            this.showQcStats = !this.showQcStats;
+            
+            // Render or destroy pie chart
+            this.$nextTick(() => {
+                if (this.showQcStats && this.qcMaskStats) {
+                    this.renderQcPieChart();
+                } else if (this.qcPieChart) {
+                    this.qcPieChart.destroy();
+                    this.qcPieChart = null;
+                }
+            });
+        },
+        
+        renderQcPieChart() {
+            // Destroy existing chart
+            if (this.qcPieChart) {
+                this.qcPieChart.destroy();
+            }
+            
+            const canvas = document.getElementById('qcPieChart');
+            if (!canvas || !this.qcMaskStats) {
+                return;
+            }
+            
+            const ctx = canvas.getContext('2d');
+            
+            // Prepare data for chart
+            const labels = [];
+            const data = [];
+            const colors = [];
+            
+            for (let i = 1; i <= 7; i++) {
+                const stat = this.qcMaskStats[i];
+                if (stat.count > 0) {  // Only include categories with pixels
+                    const category = this.config.qcMask.categories[i];
+                    labels.push(category.name);
+                    data.push(stat.percentage.toFixed(2));
+                    colors.push(category.color);
+                }
+            }
+            
+            // Create pie chart
+            this.qcPieChart = new Chart(ctx, {
+                type: 'doughnut',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        data: data,
+                        backgroundColor: colors,
+                        borderWidth: 2,
+                        borderColor: '#fff'
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    plugins: {
+                        legend: {
+                            position: 'bottom',
+                            labels: {
+                                boxWidth: 15,
+                                font: {
+                                    size: 11
+                                }
+                            }
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    return context.label + ': ' + context.parsed + '%';
+                                }
+                            }
+                        },
+                        title: {
+                            display: true,
+                            text: 'Category Distribution',
+                            font: {
+                                size: 14,
+                                weight: 'bold'
+                            }
+                        }
+                    }
+                }
+            });
+        },
 
         clearSlide() {
             this.searchId = '';
@@ -204,8 +617,15 @@ createApp({
             this.error = null;
             this.thumbnailPath = null;
             this.qcMaskPath = null;
-            this.attentionMapPath = null;
+            this.attentionMapInfo = null;
             this.currentSlideIndex = -1;
+            this.qcMaskStats = null;
+            
+            // Destroy pie chart
+            if (this.qcPieChart) {
+                this.qcPieChart.destroy();
+                this.qcPieChart = null;
+            }
             
             // Destroy viewer
             if (this.viewer) {
@@ -220,28 +640,30 @@ createApp({
         },
         
         canGoNext() {
-            return this.currentSlideIndex >= 0 && this.currentSlideIndex < this.allSlides.length - 1;
+            return this.currentSlideIndex >= 0 && this.currentSlideIndex < this.filteredSlides.length - 1;
         },
         
         goToPrevious() {
             if (this.canGoPrevious()) {
-                const prevSlide = this.allSlides[this.currentSlideIndex - 1];
-                this.searchId = prevSlide.SAMPLE_ACCESSION;
+                const prevSlide = this.filteredSlides[this.currentSlideIndex - 1];
+                const sampleIdKey = this.currentDatasetConfig.columnMapping.sampleId;
+                this.searchId = prevSlide[sampleIdKey];
                 this.loadSlide();
             }
         },
         
         goToNext() {
             if (this.canGoNext()) {
-                const nextSlide = this.allSlides[this.currentSlideIndex + 1];
-                this.searchId = nextSlide.SAMPLE_ACCESSION;
+                const nextSlide = this.filteredSlides[this.currentSlideIndex + 1];
+                const sampleIdKey = this.currentDatasetConfig.columnMapping.sampleId;
+                this.searchId = nextSlide[sampleIdKey];
                 this.loadSlide();
             }
         },
         
         getCurrentPosition() {
-            if (this.currentSlideIndex >= 0 && this.allSlides.length > 0) {
-                return `${this.currentSlideIndex + 1} / ${this.allSlides.length}`;
+            if (this.currentSlideIndex >= 0 && this.filteredSlides.length > 0) {
+                return `${this.currentSlideIndex + 1} / ${this.filteredSlides.length}`;
             }
             return '';
         },
@@ -253,7 +675,10 @@ createApp({
 
         // WSI Viewer Methods
         initViewer() {
-            if (!this.slideData || !this.slideData.FILE_PATH) {
+            const filePathKey = this.currentDatasetConfig.columnMapping.filePath;
+            const slidePath = this.slideData ? this.slideData[filePathKey] : null;
+            
+            if (!this.slideData || !slidePath) {
                 alert('No slide path available');
                 return;
             }
@@ -268,12 +693,12 @@ createApp({
 
             try {
                 // Encode the slide path for URL
-                const slidePath = encodeURIComponent(this.slideData.FILE_PATH);
+                const encodedSlidePath = encodeURIComponent(slidePath);
                 
                 // Build DZI URL
-                const dziUrl = `/dzi/slide.dzi?path=${slidePath}`;
+                const dziUrl = `/dzi/slide.dzi?path=${encodedSlidePath}`;
                 
-                console.log('Loading WSI from:', this.slideData.FILE_PATH);
+                console.log('Loading WSI from:', slidePath);
                 console.log('DZI URL:', dziUrl);
                 
                 // Initialize OpenSeadragon viewer
@@ -285,7 +710,7 @@ createApp({
                     tileSources: {
                         Image: {
                             xmlns: "http://schemas.microsoft.com/deepzoom/2008",
-                            Url: `/dzi/slide_files/?path=${slidePath}`,
+                            Url: `/dzi/slide_files/?path=${encodedSlidePath}`,
                             Format: "jpeg",
                             Overlap: "1",
                             TileSize: "254"
@@ -342,7 +767,7 @@ createApp({
                 });
                 
                 // Load slide info first
-                fetch(`/slide-info?path=${slidePath}`)
+                fetch(`/slide-info?path=${encodedSlidePath}`)
                     .then(response => response.json())
                     .then(info => {
                         console.log('Slide info:', info);
@@ -393,8 +818,13 @@ createApp({
 
     mounted() {
         console.log('Slide Viewer initialized');
-        console.log('CSV Path:', this.config.csvPath);
-        
+        console.log('Config Version:', this.config.configVersion || 'UNKNOWN - OLD VERSION');
+        console.log('CSV Path:', this.currentDatasetConfig.csvPath);
+        this.loadAvailableExperiments();
+        if (this.currentDatasetConfig.resultsBasePath || this.currentDatasetConfig.prepopulateIds) {
+            this.preloadSlideList();
+        }
+
         // Add keyboard navigation
         window.addEventListener('keydown', (e) => {
             // Only trigger if not typing in input field

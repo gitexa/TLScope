@@ -42,7 +42,62 @@ class EnhancedSlideHandler(SimpleHTTPRequestHandler):
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET, OPTIONS, POST")
         self.send_header("Access-Control-Allow-Headers", "*")
+        
+        # Add cache control headers for config and HTML files to prevent caching
+        # This ensures the browser always gets the latest version
+        path = self.path.split("?")[0]
+        if path.endswith(('.html', '.js')) and not path.startswith('/dzi/'):
+            # No caching for HTML and JS files (except DZI tiles)
+            self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+            self.send_header("Pragma", "no-cache")
+            self.send_header("Expires", "0")
+        
         super().end_headers()
+
+    def translate_path(self, path):
+        """Translate URL path to filesystem path, handling absolute paths"""
+        # Remove query string
+        original_path = path
+        path = path.split("?")[0]
+
+        print(f"   [translate_path] Input: {original_path} -> {path}")
+
+        # Check if this looks like an absolute filesystem path (not just a URL path)
+        # URL paths like "/" or "/index.html" should use default behavior
+        # Only treat as filesystem path if it starts with /mnt/, /home/, etc.
+        is_filesystem_path = path.startswith(
+            ("/mnt/", "/home/", "/tmp/", "/usr/local/", "/opt/")
+        )
+
+        if is_filesystem_path:
+            # Normalize path to resolve .. and symlinks for security
+            real_path = os.path.realpath(path)
+
+            # Allow absolute paths that start with common mount points
+            # This allows /mnt/, /home/, etc. but prevents access to system files
+            allowed_prefixes = ("/mnt/", "/home/", "/tmp/", "/usr/local/", "/opt/")
+
+            if any(real_path.startswith(prefix) for prefix in allowed_prefixes):
+                # Check if file exists and is readable
+                if os.path.exists(real_path) and os.access(real_path, os.R_OK):
+                    print(f"   [translate_path] Absolute path allowed: {real_path}")
+                    return real_path
+                else:
+                    print(
+                        f"   [translate_path] Absolute path not found or not readable: {real_path}"
+                    )
+                    return real_path  # Return anyway, let parent handle 404
+            else:
+                print(
+                    f"   [translate_path] Absolute path DENIED (not in allowed prefixes): {real_path}"
+                )
+                # Return a non-existent path to trigger 404
+                return "/dev/null/forbidden"
+
+        # Default behavior: relative to current directory for URL paths
+        result = super().translate_path(path)
+        print(f"   [translate_path] Using parent translation: {result}")
+        return result
 
     def do_OPTIONS(self):
         self.send_response(200)
@@ -50,15 +105,18 @@ class EnhancedSlideHandler(SimpleHTTPRequestHandler):
 
     def do_GET(self):
         """Handle GET requests"""
+        print(f"\n🔍 [DEBUG] GET Request: {self.path}")
 
         parsed_path = urlparse(self.path)
         path = parsed_path.path
 
         # Handle DZI metadata request
         if path.startswith("/dzi/") and path.endswith(".dzi"):
+            print(f"🔬 [DEBUG] DZI metadata request")
             if OPENSLIDE_AVAILABLE:
                 self.serve_dzi(parsed_path)
             else:
+                print(f"❌ [DEBUG] OpenSlide not available")
                 self.send_error(501, "OpenSlide not available")
             return
 
@@ -67,20 +125,119 @@ class EnhancedSlideHandler(SimpleHTTPRequestHandler):
             if OPENSLIDE_AVAILABLE:
                 self.serve_tile(parsed_path)
             else:
+                print(f"❌ [DEBUG] OpenSlide not available for tiles")
                 self.send_error(501, "OpenSlide not available")
             return
 
         # Handle slide info request
         elif path.startswith("/slide-info"):
+            print(f"📊 [DEBUG] Slide info request")
             if OPENSLIDE_AVAILABLE:
                 self.serve_slide_info(parsed_path)
             else:
+                print(f"❌ [DEBUG] OpenSlide not available for slide info")
                 self.send_error(501, "OpenSlide not available")
+            return
+
+        # Handle experiment listing request
+        elif path.startswith("/api/list-experiments"):
+            self.serve_experiments(parsed_path)
+            return
+
+        # Handle attention map info request
+        elif path.startswith("/api/attention-map"):
+            self.serve_attention_map_info(parsed_path)
             return
 
         # Handle other requests normally
         else:
+            # Check if file exists
+            if path.startswith("/"):
+                file_path = path[1:].split("?")[0]  # Remove leading / and query params
+                if file_path:
+                    full_path = os.path.join(os.getcwd(), file_path)
+                    if os.path.exists(full_path):
+                        print(f"✅ [DEBUG] File found: {file_path}")
+                    else:
+                        print(f"❌ [DEBUG] File NOT found: {file_path}")
+                        print(f"   Looking in: {os.getcwd()}")
             super().do_GET()
+
+    def serve_experiments(self, parsed_path):
+        """List experiment folders in a results base path"""
+        try:
+            query_params = parse_qs(parsed_path.query)
+            results_base = query_params.get("resultsBasePath", [None])[0]
+            if not results_base:
+                self.send_error(400, "Missing resultsBasePath parameter")
+                return
+            results_base = unquote(results_base)
+            if not os.path.isdir(results_base):
+                self.send_json({"experiments": []})
+                return
+            experiments = sorted([
+                entry for entry in os.listdir(results_base)
+                if os.path.isdir(os.path.join(results_base, entry))
+            ])
+            self.send_json({"experiments": experiments})
+        except Exception as e:
+            print(f"❌ [DEBUG] Error listing experiments: {e}")
+            self.send_error(500, str(e))
+
+    def serve_attention_map_info(self, parsed_path):
+        """Check if attention map exists for a slide and return available image paths + metadata"""
+        try:
+            query_params = parse_qs(parsed_path.query)
+            results_base = unquote(query_params.get("resultsBasePath", [None])[0] or "")
+            experiment   = unquote(query_params.get("experiment", [None])[0] or "")
+            analysis_dir = unquote(query_params.get("analysisDir", [None])[0] or "")
+            cancer_type  = unquote(query_params.get("cancerType", [None])[0] or "")
+            slide_id     = unquote(query_params.get("slideId", [None])[0] or "")
+
+            if not all([results_base, experiment, analysis_dir, cancer_type, slide_id]):
+                self.send_json({"available": False, "reason": "Missing parameters"})
+                return
+
+            slide_dir = os.path.join(results_base, experiment, analysis_dir,
+                                     "attention_maps", cancer_type, slide_id)
+
+            if not os.path.isdir(slide_dir):
+                self.send_json({"available": False, "reason": "Attention map folder not found"})
+                return
+
+            # Find the attention image (prefer *_attention_standard.png, then plots/overlay_smoothed.png)
+            candidates = [
+                os.path.join(slide_dir, f"{slide_id}_attention_standard.png"),
+                os.path.join(slide_dir, "plots", "overlay_smoothed.png"),
+                os.path.join(slide_dir, "plots", "attention_map.png"),
+            ]
+            image_path = next((p for p in candidates if os.path.isfile(p)), None)
+
+            # Load metadata if present
+            metadata = None
+            meta_file = os.path.join(slide_dir, "metadata.json")
+            if os.path.isfile(meta_file):
+                with open(meta_file) as f:
+                    metadata = json.load(f)
+
+            self.send_json({
+                "available": image_path is not None,
+                "imagePath": image_path,
+                "slideDir": slide_dir,
+                "metadata": metadata,
+            })
+        except Exception as e:
+            print(f"❌ [DEBUG] Error in attention-map info: {e}")
+            self.send_error(500, str(e))
+
+    def send_json(self, data):
+        """Send a JSON response"""
+        body = json.dumps(data).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", len(body))
+        self.end_headers()
+        self.wfile.write(body)
 
     def serve_dzi(self, parsed_path):
         """Serve DZI metadata XML"""
@@ -90,16 +247,22 @@ class EnhancedSlideHandler(SimpleHTTPRequestHandler):
             query_params = parse_qs(parsed_path.query)
             slide_path = query_params.get("path", [None])[0]
 
+            print(f"📋 [DEBUG] DZI Request - Query params: {query_params}")
+
             if not slide_path:
+                print(f"❌ [DEBUG] Missing path parameter in DZI request")
                 self.send_error(400, "Missing path parameter")
                 return
 
             slide_path = unquote(slide_path)
+            print(f"📂 [DEBUG] Decoded slide path: {slide_path}")
 
             if not os.path.exists(slide_path):
+                print(f"❌ [DEBUG] Slide file does not exist: {slide_path}")
                 self.send_error(404, f"Slide not found: {slide_path}")
                 return
 
+            print(f"✅ [DEBUG] Slide file exists, creating DeepZoom...")
             # Get or create DeepZoomGenerator
             dz = self.get_deepzoom(slide_path)
 
@@ -113,6 +276,9 @@ class EnhancedSlideHandler(SimpleHTTPRequestHandler):
           Height="{dz.level_dimensions[-1][1]}"/>
 </Image>"""
 
+            print(
+                f"✅ [DEBUG] Serving DZI metadata - Dimensions: {dz.level_dimensions[-1]}"
+            )
             self.send_response(200)
             self.send_header("Content-Type", "application/xml")
             self.send_header("Content-Length", len(dzi_xml))
@@ -121,7 +287,7 @@ class EnhancedSlideHandler(SimpleHTTPRequestHandler):
             self.wfile.write(dzi_xml.encode())
 
         except Exception as e:
-            print(f"Error serving DZI: {e}")
+            print(f"❌ [ERROR] Error serving DZI: {e}")
             import traceback
 
             traceback.print_exc()
@@ -135,12 +301,14 @@ class EnhancedSlideHandler(SimpleHTTPRequestHandler):
             slide_path = query_params.get("path", [None])[0]
 
             if not slide_path:
+                print(f"❌ [DEBUG] Missing path parameter in tile request")
                 self.send_error(400, "Missing path parameter")
                 return
 
             slide_path = unquote(slide_path)
 
             if not os.path.exists(slide_path):
+                print(f"❌ [DEBUG] Slide not found for tile: {slide_path}")
                 self.send_error(404, f"Slide not found: {slide_path}")
                 return
 
@@ -148,12 +316,17 @@ class EnhancedSlideHandler(SimpleHTTPRequestHandler):
             # Format: /dzi/slide_files/14/0_0.jpeg
             match = re.search(r"/(\d+)/(\d+)_(\d+)\.(jpeg|jpg)", parsed_path.path)
             if not match:
+                print(f"❌ [DEBUG] Invalid tile request format: {parsed_path.path}")
                 self.send_error(400, "Invalid tile request format")
                 return
 
             level = int(match.group(1))
             col = int(match.group(2))
             row = int(match.group(3))
+
+            # Only log occasionally to avoid spam (every 10th tile)
+            if (col + row) % 10 == 0:
+                print(f"🎨 [DEBUG] Serving tile: level={level}, col={col}, row={row}")
 
             # Check tile cache first
             tile_key = f"{slide_path}:{level}:{col}:{row}"
@@ -195,7 +368,7 @@ class EnhancedSlideHandler(SimpleHTTPRequestHandler):
             self.wfile.write(tile_data)
 
         except Exception as e:
-            print(f"Error serving tile: {e}")
+            print(f"❌ [ERROR] Error serving tile: {e}")
             import traceback
 
             traceback.print_exc()
@@ -207,16 +380,22 @@ class EnhancedSlideHandler(SimpleHTTPRequestHandler):
             query_params = parse_qs(parsed_path.query)
             slide_path = query_params.get("path", [None])[0]
 
+            print(f"📊 [DEBUG] Slide info request - Query params: {query_params}")
+
             if not slide_path:
+                print(f"❌ [DEBUG] Missing path parameter in slide-info request")
                 self.send_error(400, "Missing path parameter")
                 return
 
             slide_path = unquote(slide_path)
+            print(f"📂 [DEBUG] Requesting info for: {slide_path}")
 
             if not os.path.exists(slide_path):
+                print(f"❌ [DEBUG] Slide file not found: {slide_path}")
                 self.send_error(404, f"Slide not found: {slide_path}")
                 return
 
+            print(f"✅ [DEBUG] Opening slide to get metadata...")
             # Open slide and get info
             slide = OpenSlide(slide_path)
 
@@ -231,6 +410,10 @@ class EnhancedSlideHandler(SimpleHTTPRequestHandler):
 
             slide.close()
 
+            print(
+                f"✅ [DEBUG] Slide info retrieved - Dimensions: {info['dimensions']}, Levels: {info['level_count']}"
+            )
+
             json_data = json.dumps(info, indent=2)
 
             self.send_response(200)
@@ -240,7 +423,10 @@ class EnhancedSlideHandler(SimpleHTTPRequestHandler):
             self.wfile.write(json_data.encode())
 
         except Exception as e:
-            print(f"Error serving slide info: {e}")
+            print(f"❌ [ERROR] Error serving slide info: {e}")
+            import traceback
+
+            traceback.print_exc()
             self.send_error(500, f"Error getting slide info: {str(e)}")
 
     def get_deepzoom(self, slide_path):
@@ -265,14 +451,32 @@ class EnhancedSlideHandler(SimpleHTTPRequestHandler):
             oldest_key = next(iter(dz_cache))
             dz_cache.pop(oldest_key)
 
-        print(f"Cached DZI for: {os.path.basename(slide_path)}")
+        print(f"✅ [DEBUG] Cached DZI for: {os.path.basename(slide_path)}")
+        print(f"   Slide dimensions: {slide.dimensions}")
+        print(f"   DZI level count: {dz.level_count}")
 
         return dz
 
     def log_message(self, format, *args):
-        """Custom logging - only log non-200 responses"""
-        if args[1] != "200":
-            sys.stdout.write(f"[{self.log_date_time_string()}] {format % args}\n")
+        """Custom logging - log all responses with icons"""
+        # Convert status code to string (it might be HTTPStatus object)
+        status_code = str(args[1]) if len(args) > 1 else "???"
+
+        if status_code == "200":
+            icon = "✅"
+        elif status_code == "404":
+            icon = "❌"
+        elif status_code.startswith("5"):
+            icon = "💥"
+        else:
+            icon = "⚠️"
+
+        # Skip logging for tile requests to avoid spam, unless it's an error
+        path = str(args[0]) if len(args) > 0 else ""
+        if "_files/" in path and status_code == "200":
+            return
+
+        sys.stdout.write(f"{icon} [{self.log_date_time_string()}] {format % args}\n")
 
 
 def run_server(port=8080, directory=None):

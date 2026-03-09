@@ -3,438 +3,444 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Pathology Slide Viewer</title>
+    <title>TLScope</title>
     <script src="https://cdn.jsdelivr.net/npm/vue@3/dist/vue.global.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/openseadragon@4.1.0/build/openseadragon/openseadragon.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
+        *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
 
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-            background: #f5f7fa;
-            color: #2c3e50;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #f0f2f5;
+            color: #1a1a2e;
+            font-size: 14px;
+            line-height: 1.5;
         }
 
         #app {
             max-width: 1800px;
             margin: 0 auto;
-            padding: 20px;
+            padding: 24px;
         }
 
+        /* ── Card base ── */
+        .card {
+            background: #fff;
+            border-radius: 12px;
+            border: 1px solid #e8eaed;
+            box-shadow: 0 1px 4px rgba(0,0,0,.06);
+        }
+
+        /* ── Header ── */
         .header {
-            background: white;
-            padding: 20px;
+            background: #fff;
+            border-radius: 12px;
+            border: 1px solid #e8eaed;
+            box-shadow: 0 1px 4px rgba(0,0,0,.06);
+            padding: 24px;
+            margin-bottom: 20px;
+        }
+
+        .header h1 {
+            font-size: 22px;
+            font-weight: 700;
+            color: #1a1a2e;
+            letter-spacing: -0.3px;
+            margin-bottom: 20px;
+        }
+
+        /* ── Controls row (dataset / cancer type) ── */
+        .controls-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            align-items: flex-end;
+            margin-bottom: 16px;
+        }
+
+        .control-group {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .control-label {
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: #6b7280;
+        }
+
+        .control-select {
+            padding: 8px 12px;
+            font-size: 14px;
+            border: 1px solid #d1d5db;
             border-radius: 8px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-            margin-bottom: 20px;
+            background: #fff;
+            color: #1a1a2e;
+            cursor: pointer;
+            min-width: 180px;
+            transition: border-color .15s;
         }
 
-        h1 {
-            color: #2c3e50;
-            margin-bottom: 20px;
-            font-size: 28px;
+        .control-select:focus {
+            outline: none;
+            border-color: #6366f1;
+            box-shadow: 0 0 0 3px rgba(99,102,241,.1);
         }
 
+        .control-select:disabled { background: #f9fafb; color: #9ca3af; cursor: default; }
+
+        .slide-count-badge {
+            padding: 4px 10px;
+            background: #f3f4f6;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+            color: #6b7280;
+            align-self: center;
+            margin-top: 18px;
+        }
+
+        /* ── Search bar ── */
         .search-section {
             display: flex;
-            gap: 10px;
+            gap: 8px;
             align-items: center;
             flex-wrap: wrap;
+            margin-bottom: 16px;
         }
 
         .search-input {
             flex: 1;
-            min-width: 300px;
-            padding: 12px 20px;
-            font-size: 16px;
-            border: 2px solid #ddd;
+            min-width: 280px;
+            padding: 10px 16px;
+            font-size: 14px;
+            border: 1px solid #d1d5db;
             border-radius: 8px;
-            transition: all 0.3s ease;
+            transition: border-color .15s;
+            color: #1a1a2e;
         }
 
         .search-input:focus {
             outline: none;
-            border-color: #3498db;
-            box-shadow: 0 0 0 3px rgba(52, 152, 219, 0.1);
+            border-color: #6366f1;
+            box-shadow: 0 0 0 3px rgba(99,102,241,.1);
         }
-        
-        .navigation-section {
-            display: flex;
-            gap: 15px;
-            align-items: center;
-            justify-content: center;
-            margin-top: 20px;
-            padding: 15px;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            border-radius: 12px;
-            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
-        }
-        
-        .btn-nav {
+
+        .search-input::placeholder { color: #9ca3af; }
+
+        /* ── Buttons ── */
+        .btn {
             padding: 10px 20px;
+            border: none;
+            border-radius: 8px;
             font-size: 14px;
             font-weight: 600;
-            border: 2px solid white;
-            background: rgba(255, 255, 255, 0.2);
-            color: white;
-            border-radius: 8px;
             cursor: pointer;
-            transition: all 0.3s ease;
-            backdrop-filter: blur(10px);
-            min-width: 120px;
-        }
-        
-        .btn-nav:hover:not(:disabled) {
-            background: rgba(255, 255, 255, 0.3);
-            transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
-        }
-        
-        .btn-nav:disabled {
-            opacity: 0.3;
-            cursor: not-allowed;
-            border-color: rgba(255, 255, 255, 0.3);
-        }
-        
-        .slide-position {
-            font-size: 16px;
-            font-weight: 600;
-            color: white;
-            padding: 0 20px;
-            text-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
-            min-width: 150px;
-            text-align: center;
-        }        .btn {
-            padding: 12px 24px;
-            border: none;
-            border-radius: 6px;
-            font-size: 16px;
-            cursor: pointer;
-            transition: all 0.3s;
-            font-weight: 500;
+            transition: all .15s;
         }
 
-        .btn-primary {
-            background: #3498db;
-            color: white;
-        }
+        .btn-primary { background: #6366f1; color: #fff; }
+        .btn-primary:hover { background: #4f52d9; }
 
-        .btn-primary:hover {
-            background: #2980b9;
-        }
+        .btn-secondary { background: #f3f4f6; color: #374151; border: 1px solid #d1d5db; }
+        .btn-secondary:hover { background: #e5e7eb; }
 
-        .btn-secondary {
-            background: #95a5a6;
-            color: white;
-        }
-
-        .btn-secondary:hover {
-            background: #7f8c8d;
-        }
-
-        .alert {
+        /* ── Navigation ── */
+        .navigation-section {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+            justify-content: center;
+            margin-top: 16px;
             padding: 12px 20px;
-            border-radius: 6px;
-            margin-bottom: 20px;
+            background: #f9fafb;
+            border: 1px solid #e8eaed;
+            border-radius: 10px;
         }
 
-        .alert-error {
-            background: #fee;
-            color: #c33;
-            border: 1px solid #fcc;
-        }
-
-        .alert-info {
-            background: #e3f2fd;
-            color: #1976d2;
-            border: 1px solid #bbdefb;
-        }
-
-        .content-grid {
-            display: grid;
-            gap: 20px;
-        }
-
-        .slide-info {
-            background: white;
-            padding: 20px;
+        .btn-nav {
+            padding: 8px 18px;
+            font-size: 13px;
+            font-weight: 600;
+            border: 1px solid #d1d5db;
+            background: #fff;
+            color: #374151;
             border-radius: 8px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            cursor: pointer;
+            min-width: 110px;
+            transition: all .15s;
+        }
+
+        .btn-nav:hover:not(:disabled) { background: #f3f4f6; border-color: #9ca3af; }
+        .btn-nav:disabled { opacity: .35; cursor: not-allowed; }
+
+        .slide-position {
+            font-size: 13px;
+            font-weight: 600;
+            color: #6b7280;
+            min-width: 140px;
+            text-align: center;
+        }
+
+        /* ── Alert ── */
+        .alert {
+            padding: 10px 16px;
+            border-radius: 8px;
+            margin-top: 12px;
+            font-size: 13px;
+        }
+
+        .alert-error { background: #fef2f2; color: #b91c1c; border: 1px solid #fecaca; }
+        .alert-info  { background: #eff6ff; color: #1d4ed8; border: 1px solid #bfdbfe; }
+
+        /* ── Content grid ── */
+        .content-grid { display: grid; gap: 20px; }
+
+        /* ── Slide info card ── */
+        .slide-info {
+            background: #fff;
+            border-radius: 12px;
+            border: 1px solid #e8eaed;
+            box-shadow: 0 1px 4px rgba(0,0,0,.06);
+            padding: 24px;
+        }
+
+        .section-title {
+            font-size: 15px;
+            font-weight: 700;
+            color: #1a1a2e;
+            margin-bottom: 16px;
+            letter-spacing: -0.2px;
         }
 
         .info-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 15px;
-            margin-top: 15px;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 12px;
         }
 
         .info-item {
-            padding: 10px;
-            background: #f8f9fa;
-            border-radius: 4px;
+            padding: 10px 14px;
+            background: #f9fafb;
+            border-radius: 8px;
+            border: 1px solid #f3f4f6;
         }
 
         .info-label {
-            font-size: 12px;
-            color: #6c757d;
+            font-size: 10px;
+            font-weight: 700;
             text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: #9ca3af;
+            margin-bottom: 3px;
+        }
+
+        .info-value { font-size: 14px; font-weight: 600; color: #1a1a2e; }
+
+        /* ── Predictions ── */
+        .prediction-section {
+            margin-top: 20px;
+            padding-top: 20px;
+            border-top: 1px solid #f3f4f6;
+        }
+
+        .prediction-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+            gap: 12px;
+            margin-top: 12px;
+        }
+
+        .prediction-item {
+            padding: 14px;
+            background: #f5f3ff;
+            border-radius: 10px;
+            border: 1px solid #e0e7ff;
+        }
+
+        .prediction-label {
+            font-size: 10px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: #7c3aed;
             margin-bottom: 4px;
         }
 
-        .info-value {
-            font-size: 16px;
-            font-weight: 600;
-            color: #2c3e50;
-        }
+        .prediction-value { font-size: 22px; font-weight: 700; color: #4f46e5; }
 
-        .images-section {
-            background: white;
-            padding: 20px;
-            border-radius: 8px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        }
-
-        .section-title {
-            font-size: 20px;
-            font-weight: 600;
-            margin-bottom: 15px;
-            color: #2c3e50;
-        }
-
-        .image-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
-            gap: 20px;
-        }
-
-        .image-card {
-            background: #f8f9fa;
-            border-radius: 8px;
-            overflow: hidden;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-        }
-
-        .image-card-header {
-            padding: 12px 15px;
-            background: #34495e;
-            color: white;
-            font-weight: 600;
-        }
-
-        .image-card-body {
-            padding: 15px;
-        }
-
-        .image-container {
-            position: relative;
-            background: #000;
-            border-radius: 4px;
-            overflow: hidden;
-            min-height: 300px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-
-        .image-container img {
-            width: 100%;
-            height: auto;
-            display: block;
-        }
-
-        .overlay-controls {
-            display: flex;
-            gap: 10px;
-            margin-top: 10px;
-            flex-wrap: wrap;
-        }
-
-        .toggle-btn {
-            padding: 8px 16px;
-            border: 2px solid #e0e6ed;
-            background: white;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 14px;
-            transition: all 0.3s;
-        }
-
-        .toggle-btn:hover {
-            border-color: #3498db;
-            color: #3498db;
-        }
-
-        .toggle-btn.active {
-            background: #3498db;
-            color: white;
-            border-color: #3498db;
-        }
-
-        .opacity-control {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            padding: 8px 12px;
-            background: #f8f9fa;
-            border-radius: 4px;
-        }
-
-        .opacity-slider {
-            flex: 1;
-            max-width: 150px;
-        }
-
-        .loading {
-            text-align: center;
-            padding: 40px;
-            color: #95a5a6;
-        }
-
-        .spinner {
-            border: 4px solid #f3f3f3;
-            border-top: 4px solid #3498db;
-            border-radius: 50%;
-            width: 40px;
-            height: 40px;
-            animation: spin 1s linear infinite;
-            margin: 0 auto 20px;
-        }
-
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-
-        .no-image {
-            color: #95a5a6;
-            padding: 40px;
-            text-align: center;
-        }
-
+        /* ── QC metadata ── */
         .metadata-section {
             margin-top: 20px;
             padding-top: 20px;
-            border-top: 1px solid #e0e6ed;
+            border-top: 1px solid #f3f4f6;
         }
 
         .metadata-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-            gap: 12px;
+            grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+            gap: 10px;
             margin-top: 12px;
         }
 
         .metadata-item {
             padding: 8px 12px;
-            background: #f8f9fa;
-            border-radius: 4px;
-            border-left: 3px solid #3498db;
+            background: #f9fafb;
+            border-radius: 8px;
+            border-left: 3px solid #6366f1;
         }
 
         .metadata-label {
-            font-size: 11px;
-            color: #6c757d;
+            font-size: 10px;
+            font-weight: 700;
             text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: #9ca3af;
             margin-bottom: 2px;
         }
 
-        .metadata-value {
-            font-size: 14px;
-            font-weight: 600;
-            color: #2c3e50;
+        .metadata-value { font-size: 13px; font-weight: 600; color: #1a1a2e; }
+
+        /* ── Images section ── */
+        .images-section {
+            background: #fff;
+            border-radius: 12px;
+            border: 1px solid #e8eaed;
+            box-shadow: 0 1px 4px rgba(0,0,0,.06);
+            padding: 24px;
         }
 
-        .prediction-section {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            padding: 20px;
-            border-radius: 8px;
-            margin-top: 15px;
-        }
-
-        .prediction-grid {
+        .image-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-            gap: 15px;
-            margin-top: 15px;
+            grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
+            gap: 16px;
         }
 
-        .prediction-item {
-            background: rgba(255,255,255,0.15);
-            padding: 12px;
-            border-radius: 6px;
-            backdrop-filter: blur(10px);
+        .image-card {
+            background: #fff;
+            border-radius: 10px;
+            border: 1px solid #e8eaed;
+            overflow: hidden;
         }
 
-        .prediction-label {
-            font-size: 12px;
-            opacity: 0.9;
-            margin-bottom: 4px;
+        .image-card-header {
+            padding: 10px 14px;
+            background: #f9fafb;
+            border-bottom: 1px solid #e8eaed;
+            font-size: 13px;
+            font-weight: 600;
+            color: #374151;
         }
 
-        .prediction-value {
-            font-size: 20px;
-            font-weight: 700;
-        }
+        .image-card-body { padding: 14px; }
 
-        /* WSI Viewer Styles */
-        .wsi-viewer-section {
-            background: white;
-            padding: 20px;
+        .image-container {
+            position: relative;
+            background: #0f0f0f;
             border-radius: 8px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-            margin-top: 20px;
+            overflow: hidden;
+            min-height: 280px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .image-container img { width: 100%; height: auto; display: block; }
+
+        .no-image {
+            color: #9ca3af;
+            font-size: 13px;
+            padding: 40px;
+            text-align: center;
+        }
+
+        /* ── Controls under images ── */
+        .overlay-controls {
+            display: flex;
+            gap: 8px;
+            margin-top: 10px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+
+        .toggle-btn {
+            padding: 6px 14px;
+            border: 1px solid #d1d5db;
+            background: #fff;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 500;
+            color: #374151;
+            transition: all .15s;
+        }
+
+        .toggle-btn:hover { border-color: #6366f1; color: #6366f1; }
+        .toggle-btn.active { background: #6366f1; color: #fff; border-color: #6366f1; }
+
+        .opacity-control {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 12px;
+            color: #6b7280;
+        }
+
+        .opacity-slider { max-width: 120px; }
+
+        /* ── WSI Viewer ── */
+        .wsi-viewer-section {
+            background: #fff;
+            border-radius: 12px;
+            border: 1px solid #e8eaed;
+            box-shadow: 0 1px 4px rgba(0,0,0,.06);
+            padding: 24px;
         }
 
         .wsi-viewer-container {
             width: 100%;
             height: 600px;
-            background: #000;
-            border-radius: 8px;
+            background: #0f0f0f;
+            border-radius: 10px;
             position: relative;
             overflow: hidden;
         }
 
         .viewer-controls {
             display: flex;
-            gap: 10px;
-            margin-top: 15px;
+            gap: 8px;
+            margin-top: 12px;
             flex-wrap: wrap;
             align-items: center;
         }
 
         .viewer-btn {
-            padding: 8px 16px;
-            border: none;
-            background: #3498db;
-            color: white;
-            border-radius: 4px;
+            padding: 7px 14px;
+            border: 1px solid #d1d5db;
+            background: #fff;
+            color: #374151;
+            border-radius: 7px;
             cursor: pointer;
-            font-size: 14px;
-            transition: all 0.3s;
+            font-size: 13px;
+            font-weight: 500;
+            transition: all .15s;
         }
 
-        .viewer-btn:hover {
-            background: #2980b9;
-        }
-
-        .viewer-btn:disabled {
-            background: #95a5a6;
-            cursor: not-allowed;
-        }
+        .viewer-btn:hover { background: #f3f4f6; border-color: #9ca3af; }
+        .viewer-btn:disabled { background: #f9fafb; color: #9ca3af; cursor: not-allowed; }
 
         .viewer-info {
-            padding: 8px 12px;
-            background: #f8f9fa;
-            border-radius: 4px;
-            font-size: 14px;
-            color: #6c757d;
+            padding: 7px 12px;
+            background: #f9fafb;
+            border: 1px solid #e8eaed;
+            border-radius: 7px;
+            font-size: 13px;
+            color: #6b7280;
         }
 
         .wsi-loading {
@@ -443,7 +449,7 @@
             left: 50%;
             transform: translate(-50%, -50%);
             text-align: center;
-            color: white;
+            color: #fff;
             z-index: 10;
         }
 
@@ -452,62 +458,331 @@
             top: 10px;
             right: 10px;
             z-index: 100;
-            background: rgba(52, 152, 219, 0.9);
-            padding: 10px;
-            border-radius: 4px;
+            background: rgba(255,255,255,.15);
+            backdrop-filter: blur(8px);
+            border: 1px solid rgba(255,255,255,.25);
+            padding: 8px 10px;
+            border-radius: 8px;
             cursor: pointer;
-            color: white;
-            font-size: 18px;
+            color: #fff;
+            font-size: 16px;
+            transition: background .15s;
         }
 
-        .fullscreen-btn:hover {
-            background: rgba(41, 128, 185, 0.9);
+        .fullscreen-btn:hover { background: rgba(255,255,255,.25); }
+
+        /* ── Loading spinner ── */
+        .loading {
+            text-align: center;
+            padding: 60px;
+            color: #9ca3af;
         }
+
+        .spinner {
+            border: 3px solid #f3f4f6;
+            border-top-color: #6366f1;
+            border-radius: 50%;
+            width: 32px;
+            height: 32px;
+            animation: spin 0.8s linear infinite;
+            margin: 0 auto 16px;
+        }
+
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* ── QC Legend & Stats ── */
+        .qc-legend {
+            margin-top: 14px;
+            padding: 12px 14px;
+            background: #f9fafb;
+            border-radius: 8px;
+            border: 1px solid #e8eaed;
+        }
+
+        .qc-legend-title {
+            font-size: 12px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.4px;
+            color: #6b7280;
+            margin-bottom: 10px;
+        }
+
+        .qc-legend-items {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+            gap: 7px;
+        }
+
+        .qc-legend-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 12px;
+        }
+
+        .qc-color-box {
+            width: 14px;
+            height: 14px;
+            border-radius: 3px;
+            border: 1px solid rgba(0,0,0,.1);
+            flex-shrink: 0;
+        }
+
+        .qc-category-name { font-weight: 600; color: #374151; }
+        .qc-category-desc { color: #9ca3af; font-size: 11px; }
+
+        .qc-stats-panel {
+            margin-top: 14px;
+            padding: 14px;
+            background: #f9fafb;
+            border-radius: 8px;
+            border: 1px solid #e8eaed;
+        }
+
+        .qc-stats-title {
+            font-size: 12px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.4px;
+            color: #6b7280;
+            margin-bottom: 12px;
+        }
+
+        .qc-stats-items { display: grid; gap: 7px; }
+
+        .qc-stat-item { display: flex; align-items: center; gap: 10px; }
+
+        .qc-stat-label {
+            min-width: 110px;
+            font-size: 12px;
+            font-weight: 600;
+            color: #374151;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .qc-stat-bar-container {
+            flex: 1;
+            height: 8px;
+            background: #e5e7eb;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+
+        .qc-stat-bar { height: 100%; border-radius: 4px; transition: width .3s ease; }
+
+        .qc-stat-value {
+            font-size: 11px;
+            color: #9ca3af;
+            min-width: 110px;
+            text-align: right;
+            font-variant-numeric: tabular-nums;
+        }
+
+        .qc-chart-container {
+            margin-top: 14px;
+            display: flex;
+            justify-content: center;
+        }
+
+        .qc-chart-canvas { max-width: 260px; max-height: 260px; }
+
+        /* ── Experiment Results Section ── */
+        .experiment-section {
+            background: #fff;
+            border-radius: 12px;
+            border: 1px solid #e8eaed;
+            box-shadow: 0 1px 4px rgba(0,0,0,.06);
+            overflow: hidden;
+        }
+
+        .experiment-section-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 16px 24px;
+            cursor: pointer;
+            user-select: none;
+            border-bottom: 1px solid transparent;
+            transition: background .15s;
+        }
+
+        .experiment-section-header:hover { background: #fafafa; }
+
+        .experiment-section-header.open { border-bottom-color: #e8eaed; }
+
+        .experiment-section-title {
+            font-size: 15px;
+            font-weight: 700;
+            color: #1a1a2e;
+            letter-spacing: -0.2px;
+        }
+
+        .experiment-section-chevron {
+            font-size: 12px;
+            color: #9ca3af;
+            transition: transform .2s;
+        }
+
+        .experiment-section-chevron.open { transform: rotate(180deg); }
+
+        .experiment-section-body { padding: 20px 24px 24px; }
+
+        .experiment-selector-row {
+            display: flex;
+            align-items: flex-end;
+            gap: 12px;
+            margin-bottom: 20px;
+        }
+
+        .attention-loading {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 20px 0;
+            color: #9ca3af;
+            font-size: 13px;
+        }
+
+        .attention-unavailable {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            padding: 16px;
+            background: #fffbeb;
+            border: 1px solid #fde68a;
+            border-radius: 8px;
+            color: #92400e;
+            font-size: 13px;
+        }
+
+        .attention-reason { font-size: 12px; color: #9ca3af; }
+
+        .attention-results {
+            display: grid;
+            grid-template-columns: 1fr 260px;
+            gap: 16px;
+            align-items: start;
+        }
+
+        @media (max-width: 900px) {
+            .attention-results { grid-template-columns: 1fr; }
+        }
+
+        .attention-image-card, .attention-meta-card {
+            border-radius: 10px;
+            border: 1px solid #e8eaed;
+            overflow: hidden;
+        }
+
+        .attention-image-header {
+            padding: 10px 14px;
+            background: #f9fafb;
+            border-bottom: 1px solid #e8eaed;
+            font-size: 13px;
+            font-weight: 600;
+            color: #374151;
+        }
+
+        .attention-image-body {
+            background: #0f0f0f;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .attention-img { width: 100%; height: auto; display: block; }
+
+        .attention-meta-grid {
+            padding: 12px;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .attention-meta-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 6px 8px;
+            background: #f9fafb;
+            border-radius: 6px;
+            font-size: 12px;
+        }
+
+        .attention-meta-label { color: #6b7280; font-weight: 500; }
+        .attention-meta-value { color: #1a1a2e; font-weight: 600; font-variant-numeric: tabular-nums; }
     </style>
 </head>
 <body>
     <div id="app">
         <div class="header">
-            <h1>🔬 Pathology Slide Viewer</h1>
-            
-            <div class="search-section">
-                <input 
-                    v-model="searchId" 
-                    @keyup.enter="loadSlide"
-                    type="text" 
-                    class="search-input" 
-                    placeholder="Enter Sample Accession ID (e.g., BL-13-E28458)"
-                >
-                <button @click="loadSlide" class="btn btn-primary">Load Slide</button>
-                <button @click="clearSlide" class="btn btn-secondary">Clear</button>
-            </div>
-            
-            <!-- Navigation Controls -->
-            <div v-if="slideData && currentSlideIndex >= 0" class="navigation-section">
-                <button 
-                    @click="goToPrevious" 
-                    :disabled="!canGoPrevious()"
-                    class="btn btn-nav"
-                    title="Previous slide"
-                >
-                    ◀ Previous
-                </button>
-                <span class="slide-position">
-                    Slide {{ getCurrentPosition() }}
+            <h1>TLScope</h1>
+
+            <!-- Dataset + Cancer type controls -->
+            <div class="controls-row">
+                <div class="control-group">
+                    <span class="control-label">Dataset</span>
+                    <select v-model="selectedDataset" @change="onDatasetChange" class="control-select">
+                        <option v-for="dataset in availableDatasets" :key="dataset" :value="dataset">
+                            {{ config.datasets[dataset].name }}
+                        </option>
+                    </select>
+                </div>
+
+                <div class="control-group">
+                    <span class="control-label">Cancer Type</span>
+                    <select
+                        v-model="selectedCancerType"
+                        @change="onCancerTypeChange"
+                        class="control-select"
+                        :disabled="availableCancerTypes.length === 0"
+                    >
+                        <option value="">All types</option>
+                        <option v-for="ct in availableCancerTypes" :key="ct" :value="ct">{{ ct || 'Unknown' }}</option>
+                    </select>
+                </div>
+
+                <span v-if="allSlides.length > 0" class="slide-count-badge">
+                    {{ selectedCancerType ? filteredSlides.length : allSlides.length }} slides
                 </span>
-                <button 
-                    @click="goToNext" 
-                    :disabled="!canGoNext()"
-                    class="btn btn-nav"
-                    title="Next slide"
-                >
-                    Next ▶
-                </button>
             </div>
 
-            <div v-if="error" class="alert alert-error">
-                {{ error }}
+            <!-- Search -->
+            <div class="search-section">
+                <!-- Prepopulated dropdown for datasets with a slide list -->
+                <select
+                    v-if="hasSampleIdList"
+                    @change="onSampleIdSelect"
+                    class="search-input"
+                    style="cursor:pointer;"
+                >
+                    <option value="">— Select a slide ID —</option>
+                    <option v-for="id in sampleIdOptions" :key="id" :value="id" :selected="id === searchId">{{ id }}</option>
+                </select>
+                <!-- Free-text input for other datasets -->
+                <input
+                    v-else
+                    v-model="searchId"
+                    @keyup.enter="loadSlide"
+                    type="text"
+                    class="search-input"
+                    placeholder="Enter Sample ID…"
+                >
+                <button v-if="!hasSampleIdList" @click="loadSlide" class="btn btn-primary">Load</button>
+                <button @click="clearSlide" class="btn btn-secondary">Clear</button>
             </div>
+
+            <!-- Navigation -->
+            <div v-if="slideData && currentSlideIndex >= 0" class="navigation-section">
+                <button @click="goToPrevious" :disabled="!canGoPrevious()" class="btn btn-nav">◀ Previous</button>
+                <span class="slide-position">{{ getCurrentPosition() }}</span>
+                <button @click="goToNext" :disabled="!canGoNext()" class="btn btn-nav">Next ▶</button>
+            </div>
+
+            <div v-if="error" class="alert alert-error">{{ error }}</div>
         </div>
 
         <div v-if="loading" class="loading">
@@ -518,30 +793,31 @@
         <div v-if="slideData && !loading" class="content-grid">
             <!-- Slide Information -->
             <div class="slide-info">
-                <div class="section-title">📋 Slide Information</div>
+                <div class="section-title">Slide Information</div>
                 <div class="info-grid">
                     <div class="info-item">
                         <div class="info-label">Sample ID</div>
-                        <div class="info-value">{{ slideData.SAMPLE_ACCESSION }}</div>
+                        <div class="info-value">{{ slideData[currentDatasetConfig.columnMapping.sampleId] }}</div>
                     </div>
                     <div class="info-item">
                         <div class="info-label">Cancer Type</div>
-                        <div class="info-value">{{ slideData.onco_tree_code_level_2 || 'N/A' }}</div>
+                        <div class="info-value">{{ slideData[currentDatasetConfig.columnMapping.cancerType] || 'N/A' }}</div>
                     </div>
                     <div class="info-item">
                         <div class="info-label">Biopsy Site</div>
-                        <div class="info-value">{{ slideData.BIOPSY_SITE || 'N/A' }}</div>
+                        <div class="info-value">{{ slideData[currentDatasetConfig.columnMapping.biopsySite] || 'N/A' }}</div>
                     </div>
                     <div class="info-item">
                         <div class="info-label">Procedure Date</div>
-                        <div class="info-value">{{ slideData.PROCEDURE_DT || 'N/A' }}</div>
+                        <div class="info-value">{{ slideData[currentDatasetConfig.columnMapping.procedureDate] || 'N/A' }}</div>
                     </div>
                 </div>
 
                 <!-- Predictions -->
                 <div v-if="slideData.prediction_successful" class="prediction-section">
-                    <div class="section-title">🎯 Model Predictions</div>
+                    <div class="section-title">Model Predictions</div>
                     <div class="prediction-grid">
+                        <!-- TCGA / generic fields -->
                         <div v-if="slideData.pred_num_tls !== undefined" class="prediction-item">
                             <div class="prediction-label">TLS Count</div>
                             <div class="prediction-value">{{ slideData.pred_num_tls }}</div>
@@ -558,12 +834,49 @@
                             <div class="prediction-label">Confidence</div>
                             <div class="prediction-value">{{ (slideData.confidence * 100).toFixed(1) }}%</div>
                         </div>
+                        <!-- Reader study fields -->
+                        <div v-if="slideData.pred !== undefined" class="prediction-item">
+                            <div class="prediction-label">Pred</div>
+                            <div class="prediction-value">{{ slideData.pred }}</div>
+                        </div>
+                        <div v-if="slideData.pred_raw !== undefined" class="prediction-item">
+                            <div class="prediction-label">Pred Raw</div>
+                            <div class="prediction-value">{{ typeof slideData.pred_raw === 'number' ? slideData.pred_raw.toFixed(3) : slideData.pred_raw }}</div>
+                        </div>
+                        <div v-if="slideData.TLS_count_consensus !== undefined" class="prediction-item">
+                            <div class="prediction-label">TLS Consensus</div>
+                            <div class="prediction-value">{{ slideData.TLS_count_consensus }}</div>
+                        </div>
+                        <div v-if="slideData.TLS_count_BS !== undefined" class="prediction-item">
+                            <div class="prediction-label">TLS (BS)</div>
+                            <div class="prediction-value">{{ slideData.TLS_count_BS }}</div>
+                        </div>
+                        <div v-if="slideData.TLS_count_GR !== undefined" class="prediction-item">
+                            <div class="prediction-label">TLS (GR)</div>
+                            <div class="prediction-value">{{ slideData.TLS_count_GR }}</div>
+                        </div>
+                        <div v-if="slideData.GC_consensus !== undefined" class="prediction-item">
+                            <div class="prediction-label">GC Consensus</div>
+                            <div class="prediction-value">{{ slideData.GC_consensus }}</div>
+                        </div>
+                        <div v-if="slideData.GC_BS !== undefined" class="prediction-item">
+                            <div class="prediction-label">GC (BS)</div>
+                            <div class="prediction-value">{{ slideData.GC_BS }}</div>
+                        </div>
+                        <div v-if="slideData.GC_GR !== undefined" class="prediction-item">
+                            <div class="prediction-label">GC (GR)</div>
+                            <div class="prediction-value">{{ slideData.GC_GR }}</div>
+                        </div>
+                        <div v-if="slideData.GC_present !== undefined" class="prediction-item">
+                            <div class="prediction-label">GC Present</div>
+                            <div class="prediction-value">{{ slideData.GC_present }}</div>
+                        </div>
                     </div>
                 </div>
 
                 <!-- QC Metadata -->
                 <div class="metadata-section">
-                    <div class="section-title">🔍 Image Quality Metrics</div>
+                    <div class="section-title">Image Quality Metrics</div>
                     <div class="metadata-grid">
                         <div class="metadata-item">
                             <div class="metadata-label">Tissue Share</div>
@@ -602,8 +915,8 @@
             </div>
 
             <!-- WSI Viewer Section -->
-            <div v-if="slideData && slideData.FILE_PATH" class="wsi-viewer-section">
-                <div class="section-title">🔬 Whole Slide Image Viewer</div>
+            <div v-if="slideData && slideData[currentDatasetConfig.columnMapping.filePath]" class="wsi-viewer-section">
+                <div class="section-title">Whole Slide Image Viewer</div>
                 
                 <div class="wsi-viewer-container">
                     <div v-if="wsiLoading" class="wsi-loading">
@@ -630,7 +943,7 @@
                         ➖ Zoom Out
                     </button>
                     <div class="viewer-info">
-                        <strong>File:</strong> {{ slideData.FILE_PATH ? slideData.FILE_PATH.split('/').pop() : 'N/A' }}
+                        <strong>File:</strong> {{ slideData[currentDatasetConfig.columnMapping.filePath] ? slideData[currentDatasetConfig.columnMapping.filePath].split('/').pop() : 'N/A' }}
                     </div>
                     <div v-if="viewer" class="viewer-info">
                         <strong>Zoom:</strong> {{ viewerZoom.toFixed(2) }}x
@@ -640,7 +953,7 @@
 
             <!-- Images Section -->
             <div class="images-section">
-                <div class="section-title">🖼️ Slide Images</div>
+                <div class="section-title">Slide Images</div>
                 
                 <div class="image-grid">
                     <!-- Thumbnail -->
@@ -659,65 +972,88 @@
                         <div class="image-card-header">Quality Control Mask</div>
                         <div class="image-card-body">
                             <div class="image-container">
-                                <img v-if="qcMaskPath" :src="qcMaskPath" alt="QC Mask">
+                                <canvas v-if="qcMaskPath" id="qcMaskCanvas" style="width: 100%; height: auto;"></canvas>
                                 <div v-else class="no-image">QC Mask not available</div>
                             </div>
                             <div v-if="qcMaskPath" class="overlay-controls">
+                                <button 
+                                    class="toggle-btn"
+                                    :class="{ active: showQcLegend }"
+                                    @click="toggleQcLegend"
+                                >
+                                    {{ showQcLegend ? 'Hide' : 'Show' }} Legend
+                                </button>
+                                <button 
+                                    class="toggle-btn"
+                                    :class="{ active: showQcStats }"
+                                    @click="toggleQcStats"
+                                >
+                                    {{ showQcStats ? 'Hide' : 'Show' }} Statistics
+                                </button>
                                 <div class="opacity-control">
                                     <label>Opacity:</label>
                                     <input type="range" min="0" max="100" v-model="qcOpacity" class="opacity-slider">
                                     <span>{{ qcOpacity }}%</span>
                                 </div>
                             </div>
-                        </div>
-                    </div>
-
-                    <!-- Attention Map -->
-                    <div class="image-card">
-                        <div class="image-card-header">Attention Map</div>
-                        <div class="image-card-body">
-                            <div class="image-container">
-                                <img v-if="attentionMapPath" :src="attentionMapPath" alt="Attention Map">
-                                <div v-else class="no-image">Attention map not computed</div>
+                            
+                            <!-- Legend -->
+                            <div v-if="qcMaskPath && showQcLegend" class="qc-legend">
+                                <div class="qc-legend-title">🏷️ Category Legend</div>
+                                <div class="qc-legend-items">
+                                    <div v-for="(category, key) in config.qcMask.categories" :key="key" class="qc-legend-item">
+                                        <div class="qc-color-box" :style="{ backgroundColor: category.color }"></div>
+                                        <div>
+                                            <div class="qc-category-name">{{ category.name }}</div>
+                                            <div class="qc-category-desc">{{ category.description }}</div>
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
-                            <div v-if="attentionMapPath" class="overlay-controls">
-                                <button 
-                                    class="toggle-btn"
-                                    :class="{ active: showHeatmap }"
-                                    @click="showHeatmap = !showHeatmap"
-                                >
-                                    {{ showHeatmap ? 'Hide' : 'Show' }} Heatmap
-                                </button>
-                                <div class="opacity-control">
-                                    <label>Opacity:</label>
-                                    <input type="range" min="0" max="100" v-model="attentionOpacity" class="opacity-slider">
-                                    <span>{{ attentionOpacity }}%</span>
+                            
+                            <!-- Statistics -->
+                            <div v-if="qcMaskPath && showQcStats && qcMaskStats" class="qc-stats-panel">
+                                <div class="qc-stats-title">📊 Pixel Distribution</div>
+                                <div class="qc-stats-items">
+                                    <div v-for="(stat, key) in qcMaskStats" :key="key" class="qc-stat-item">
+                                        <div class="qc-stat-label">
+                                            <div class="qc-color-box" :style="{ backgroundColor: config.qcMask.categories[key].color }"></div>
+                                            {{ config.qcMask.categories[key].name }}
+                                        </div>
+                                        <div class="qc-stat-bar-container">
+                                            <div class="qc-stat-bar" 
+                                                 :style="{ width: stat.percentage + '%', backgroundColor: config.qcMask.categories[key].color }">
+                                            </div>
+                                        </div>
+                                        <div class="qc-stat-value">
+                                            {{ formatNumber(stat.count) }} ({{ stat.percentage.toFixed(2) }}%)
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <!-- Pie Chart -->
+                                <div class="qc-chart-container">
+                                    <canvas id="qcPieChart" class="qc-chart-canvas"></canvas>
                                 </div>
                             </div>
                         </div>
                     </div>
 
-                    <!-- Overlay View -->
-                    <div v-if="thumbnailPath && (qcMaskPath || attentionMapPath)" class="image-card">
+                    <!-- Overlay View (QC only now) -->
+                    <div v-if="thumbnailPath && qcMaskPath" class="image-card">
                         <div class="image-card-header">Overlay View</div>
                         <div class="image-card-body">
                             <div class="image-container" style="position: relative;">
                                 <img :src="thumbnailPath" alt="Base" style="position: absolute; top: 0; left: 0; width: 100%;">
-                                <img 
-                                    v-if="qcMaskPath && showQcOverlay" 
-                                    :src="qcMaskPath" 
+                                <img
+                                    v-if="qcMaskPath && showQcOverlay"
+                                    :src="qcMaskPath"
                                     alt="QC Overlay"
                                     :style="{ opacity: qcOpacity / 100, position: 'absolute', top: 0, left: 0, width: '100%' }"
                                 >
-                                <img 
-                                    v-if="attentionMapPath && showAttentionOverlay" 
-                                    :src="attentionMapPath" 
-                                    alt="Attention Overlay"
-                                    :style="{ opacity: attentionOpacity / 100, position: 'absolute', top: 0, left: 0, width: '100%' }"
-                                >
                             </div>
                             <div class="overlay-controls">
-                                <button 
+                                <button
                                     v-if="qcMaskPath"
                                     class="toggle-btn"
                                     :class="{ active: showQcOverlay }"
@@ -725,22 +1061,110 @@
                                 >
                                     {{ showQcOverlay ? 'Hide' : 'Show' }} QC Mask
                                 </button>
-                                <button 
-                                    v-if="attentionMapPath"
-                                    class="toggle-btn"
-                                    :class="{ active: showAttentionOverlay }"
-                                    @click="showAttentionOverlay = !showAttentionOverlay"
-                                >
-                                    {{ showAttentionOverlay ? 'Hide' : 'Show' }} Attention
-                                </button>
                             </div>
                         </div>
                     </div>
                 </div>
             </div>
+
+            <!-- Experiment Results Section -->
+            <div v-if="availableExperiments.length > 0" class="experiment-section">
+                <!-- Collapsible header -->
+                <div
+                    class="experiment-section-header"
+                    :class="{ open: showExperimentSection }"
+                    @click="showExperimentSection = !showExperimentSection"
+                >
+                    <span class="experiment-section-title">Experiment Results</span>
+                    <span class="experiment-section-chevron" :class="{ open: showExperimentSection }">▼</span>
+                </div>
+
+                <div v-if="showExperimentSection" class="experiment-section-body">
+                    <!-- Experiment selector -->
+                    <div class="experiment-selector-row">
+                        <div class="control-group">
+                            <span class="control-label">Experiment</span>
+                            <select v-model="selectedExperiment" @change="onExperimentChange" class="control-select">
+                                <option v-for="exp in availableExperiments" :key="exp" :value="exp">{{ exp }}</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- Loading state -->
+                    <div v-if="attentionMapLoading" class="attention-loading">
+                        <div class="spinner" style="margin:0; width:20px; height:20px; border-width:2px;"></div>
+                        <span>Checking for attention map…</span>
+                    </div>
+
+                    <!-- Not available -->
+                    <div v-else-if="attentionMapInfo && !attentionMapInfo.available" class="attention-unavailable">
+                        <span>Attention map not available for this slide in <strong>{{ selectedExperiment }}</strong></span>
+                        <span v-if="attentionMapInfo.reason" class="attention-reason">{{ attentionMapInfo.reason }}</span>
+                    </div>
+
+                    <!-- Available: show image + metadata -->
+                    <div v-else-if="attentionMapInfo && attentionMapInfo.available" class="attention-results">
+                        <div class="attention-image-card">
+                            <div class="attention-image-header">Attention Map — {{ selectedExperiment }}</div>
+                            <div class="attention-image-body">
+                                <img :src="attentionMapInfo.imagePath" alt="Attention Map" class="attention-img">
+                            </div>
+                        </div>
+
+                        <!-- Attention metadata -->
+                        <div v-if="attentionMapInfo.metadata" class="attention-meta-card">
+                            <div class="attention-image-header">Statistics</div>
+                            <div class="attention-meta-grid">
+                                <div class="attention-meta-item" v-if="attentionMapInfo.metadata.n_patches != null">
+                                    <span class="attention-meta-label">Patches</span>
+                                    <span class="attention-meta-value">{{ formatNumber(attentionMapInfo.metadata.n_patches) }}</span>
+                                </div>
+                                <div class="attention-meta-item" v-if="attentionMapInfo.metadata.entropy != null">
+                                    <span class="attention-meta-label">Entropy</span>
+                                    <span class="attention-meta-value">{{ attentionMapInfo.metadata.entropy.toFixed(3) }}</span>
+                                </div>
+                                <div class="attention-meta-item" v-if="attentionMapInfo.metadata.normalized_entropy != null">
+                                    <span class="attention-meta-label">Norm. Entropy</span>
+                                    <span class="attention-meta-value">{{ attentionMapInfo.metadata.normalized_entropy.toFixed(3) }}</span>
+                                </div>
+                                <div class="attention-meta-item" v-if="attentionMapInfo.metadata.gini_coefficient != null">
+                                    <span class="attention-meta-label">Gini Coeff.</span>
+                                    <span class="attention-meta-value">{{ attentionMapInfo.metadata.gini_coefficient.toFixed(3) }}</span>
+                                </div>
+                                <div class="attention-meta-item" v-if="attentionMapInfo.metadata.effective_n_patches != null">
+                                    <span class="attention-meta-label">Effective Patches</span>
+                                    <span class="attention-meta-value">{{ attentionMapInfo.metadata.effective_n_patches.toFixed(1) }}</span>
+                                </div>
+                                <div class="attention-meta-item" v-if="attentionMapInfo.metadata.top_1_percent != null">
+                                    <span class="attention-meta-label">Top 1% Attn.</span>
+                                    <span class="attention-meta-value">{{ attentionMapInfo.metadata.top_1_percent.toFixed(4) }}</span>
+                                </div>
+                                <div class="attention-meta-item" v-if="attentionMapInfo.metadata.top_5_percent != null">
+                                    <span class="attention-meta-label">Top 5% Attn.</span>
+                                    <span class="attention-meta-value">{{ attentionMapInfo.metadata.top_5_percent.toFixed(4) }}</span>
+                                </div>
+                                <div class="attention-meta-item" v-if="attentionMapInfo.metadata.pred_tls != null">
+                                    <span class="attention-meta-label">Pred. TLS</span>
+                                    <span class="attention-meta-value">{{ attentionMapInfo.metadata.pred_tls }}</span>
+                                </div>
+                                <div class="attention-meta-item" v-if="attentionMapInfo.metadata.pred_gc != null">
+                                    <span class="attention-meta-label">Pred. GC</span>
+                                    <span class="attention-meta-value">{{ attentionMapInfo.metadata.pred_gc }}</span>
+                                </div>
+                                <div class="attention-meta-item" v-if="attentionMapInfo.metadata.confidence != null">
+                                    <span class="attention-meta-label">Confidence</span>
+                                    <span class="attention-meta-value">{{ (attentionMapInfo.metadata.confidence * 100).toFixed(1) }}%</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div><!-- end experiment-section-body -->
+            </div>
+
         </div>
     </div>
 
-    <script src="app.js"></script>
+    <script src="config.js?v=20260309f"></script>
+    <script src="app.js?v=20260309f"></script>
 </body>
 </html>

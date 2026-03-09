@@ -134,6 +134,7 @@ def generate_from_csv(
     import pandas as pd
 
     # Read CSV
+    print(f"Reading CSV: {csv_path}")
     df = pd.read_csv(csv_path)
 
     if path_column not in df.columns:

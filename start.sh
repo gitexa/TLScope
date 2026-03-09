@@ -2,7 +2,7 @@
 # Quick start script for the Slide Viewer
 
 echo "================================================"
-echo "🔬 Pathology Slide Viewer - Quick Start"
+echo "🔬 TLScope - Quick Start"
 echo "================================================"
 echo ""
 
