@@ -1063,18 +1063,17 @@
                         </div>
                     </div>
 
-                    <!-- Overlay View (QC only now) -->
+                    <!-- Overlay View -->
                     <div v-if="thumbnailPath && qcMaskPath" class="image-card">
                         <div class="image-card-header">Overlay View</div>
                         <div class="image-card-body">
                             <div class="image-container" style="position: relative;">
-                                <img :src="thumbnailPath" alt="Base" style="position: absolute; top: 0; left: 0; width: 100%;">
-                                <img
+                                <img :src="thumbnailPath" alt="Base" style="width: 100%; display: block;">
+                                <canvas
                                     v-if="qcMaskPath && showQcOverlay"
-                                    :src="qcMaskPath"
-                                    alt="QC Overlay"
-                                    :style="{ opacity: qcOpacity / 100, position: 'absolute', top: 0, left: 0, width: '100%' }"
-                                >
+                                    id="qcOverlayCanvas"
+                                    :style="{ opacity: qcOpacity / 100, position: 'absolute', top: 0, left: 0, width: '100%', height: '100%' }"
+                                ></canvas>
                             </div>
                             <div class="overlay-controls">
                                 <button
@@ -1269,7 +1268,7 @@
         </div>
     </div>
 
-    <script src="config.js?v=20260309m"></script>
-    <script src="app.js?v=20260309m"></script>
+    <script src="config.js?v=20260309q"></script>
+    <script src="app.js?v=20260309q"></script>
 </body>
 </html>

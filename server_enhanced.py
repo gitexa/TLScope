@@ -159,6 +159,11 @@ class EnhancedSlideHandler(SimpleHTTPRequestHandler):
             self.serve_attention_scores(parsed_path)
             return
 
+        # Handle QC mask (downsampled) request
+        elif path.startswith("/api/qc-mask"):
+            self.serve_qc_mask(parsed_path)
+            return
+
         # Handle other requests normally
         else:
             # Check if file exists
@@ -320,6 +325,68 @@ class EnhancedSlideHandler(SimpleHTTPRequestHandler):
             })
         except Exception as e:
             print(f"❌ [DEBUG] Error in attention-scores: {e}")
+            import traceback; traceback.print_exc()
+            self.send_error(500, str(e))
+
+    def serve_qc_mask(self, parsed_path):
+        """Serve a downsampled, colorized QC mask PNG"""
+        try:
+            from PIL import Image
+            import numpy as np
+            Image.MAX_IMAGE_PIXELS = None
+
+            query_params = parse_qs(parsed_path.query)
+            mask_path = unquote(query_params.get("path", [None])[0] or "")
+            max_dim   = int(query_params.get("maxDim", ["2048"])[0])
+
+            if not mask_path or not os.path.isfile(mask_path):
+                self.send_error(404, "Mask not found")
+                return
+
+            img = Image.open(mask_path)
+            w, h = img.size
+
+            # Downsample so longest side <= max_dim
+            scale = min(max_dim / w, max_dim / h, 1.0)
+            if scale < 1.0:
+                new_w = max(1, int(w * scale))
+                new_h = max(1, int(h * scale))
+                img = img.resize((new_w, new_h), Image.NEAREST)
+
+            arr = np.array(img)
+            raw_mode = query_params.get("raw", ["0"])[0] == "1"
+
+            if raw_mode:
+                # Return raw grayscale (category values) for client-side colorization
+                out_img = Image.fromarray(arr, 'L')
+            else:
+                # Colorize: map category values to RGBA
+                COLORS = {
+                    1: (76,  175, 80,  255),
+                    2: (255, 193, 7,   255),
+                    3: (139, 69,  19,  255),
+                    4: (233, 30,  99,  255),
+                    5: (33,  150, 243, 255),
+                    6: (158, 158, 158, 255),
+                    7: (245, 245, 245, 255),
+                }
+                rgba = np.zeros((*arr.shape, 4), dtype=np.uint8)
+                for v, color in COLORS.items():
+                    rgba[arr == v] = color
+                out_img = Image.fromarray(rgba, 'RGBA')
+            buf = io.BytesIO()
+            out_img.save(buf, 'PNG', optimize=False)
+            buf.seek(0)
+            data = buf.read()
+
+            self.send_response(200)
+            self.send_header("Content-Type", "image/png")
+            self.send_header("Content-Length", len(data))
+            self.send_header("Cache-Control", "public, max-age=86400")
+            self.end_headers()
+            self.wfile.write(data)
+        except Exception as e:
+            print(f"❌ [DEBUG] Error in qc-mask: {e}")
             import traceback; traceback.print_exc()
             self.send_error(500, str(e))
 

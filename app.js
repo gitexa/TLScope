@@ -50,7 +50,7 @@ createApp({
             // QC Mask visualization
             qcMaskStats: null,
             qcRawPixels: null,      // raw category values per pixel for layer toggling
-            qcLayerVisibility: { 1: true, 2: true, 3: true, 4: true, 5: true, 6: true, 7: true },
+            qcLayerVisibility: { '1': true, '2': true, '3': true, '4': true, '5': true, '6': true, '7': true },
             showQcLegend: CONFIG.qcMask.showLegendByDefault,
             showQcStats: CONFIG.qcMask.showStatsByDefault,
             qcPieChart: null,
@@ -478,60 +478,46 @@ createApp({
         
         // QC Mask colorization methods
         async renderQcMaskToCanvas(imagePath) {
-            console.log('Rendering QC mask to canvas:', imagePath);
+            console.log('Rendering QC mask via API:', imagePath);
 
             try {
-                // Fetch PNG as raw bytes to bypass browser color management
-                const response = await fetch(imagePath);
+                // Use server-side downsampling + raw grayscale to get category values
+                const apiUrl = `/api/qc-mask?path=${encodeURIComponent(imagePath)}&maxDim=2048&raw=1`;
+                const response = await fetch(apiUrl);
                 if (!response.ok) throw new Error(`Failed to fetch mask: ${response.status}`);
                 const blob = await response.blob();
 
-                // createImageBitmap with colorSpaceConversion:'none' preserves raw pixel values
+                // Downsampled image is small enough for createImageBitmap
                 const bitmap = await createImageBitmap(blob, { colorSpaceConversion: 'none' });
 
                 const canvas = document.getElementById('qcMaskCanvas');
                 if (!canvas) throw new Error('Canvas element not found');
 
-                canvas.width = bitmap.width;
+                canvas.width  = bitmap.width;
                 canvas.height = bitmap.height;
 
-                // Use willReadFrequently hint for performance
                 const ctx = canvas.getContext('2d', { willReadFrequently: true });
                 ctx.drawImage(bitmap, 0, 0);
                 bitmap.close();
 
                 const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
                 const data = imageData.data;
-
-                // Initialize pixel counters
-                const stats = {};
-                for (let i = 1; i <= 7; i++) {
-                    stats[i] = { count: 0, percentage: 0 };
-                }
-
                 const totalPixels = canvas.width * canvas.height;
 
-                // Pre-build color lookup table to avoid repeated hex parsing
-                const colorLut = {};
-                for (let v = 1; v <= 7; v++) {
-                    const cat = this.config.qcMask.categories[v];
-                    colorLut[v] = cat ? this.hexToRgb(cat.color) : null;
-                }
-
-                // Store raw category values for layer toggling
-                const rawPixels = new Uint8Array(data.length / 4);
-                for (let i = 0; i < data.length; i += 4) {
-                    rawPixels[i / 4] = data[i]; // red channel = category value
+                // Store raw category values (red channel = value for grayscale PNG)
+                const rawPixels = new Uint8Array(totalPixels);
+                for (let i = 0; i < totalPixels; i++) {
+                    rawPixels[i] = data[i * 4];
                 }
                 this.qcRawPixels = { data: rawPixels, width: canvas.width, height: canvas.height };
 
                 // Count stats
+                const stats = {};
+                for (let i = 1; i <= 7; i++) stats[i] = { count: 0, percentage: 0 };
                 for (let i = 0; i < rawPixels.length; i++) {
                     const v = rawPixels[i];
                     if (v >= 1 && v <= 7) stats[v].count++;
                 }
-
-                // Calculate percentages
                 for (let i = 1; i <= 7; i++) {
                     stats[i].percentage = (stats[i].count / totalPixels) * 100;
                 }
@@ -554,16 +540,8 @@ createApp({
         
         redrawQcMask() {
             if (!this.qcRawPixels) return;
-            const canvas = document.getElementById('qcMaskCanvas');
-            if (!canvas) return;
 
             const { data: rawPixels, width, height } = this.qcRawPixels;
-            canvas.width  = width;
-            canvas.height = height;
-
-            const ctx = canvas.getContext('2d', { willReadFrequently: true });
-            const imageData = ctx.createImageData(width, height);
-            const out = imageData.data;
 
             const colorLut = {};
             for (let v = 1; v <= 7; v++) {
@@ -571,10 +549,13 @@ createApp({
                 colorLut[v] = cat ? this.hexToRgb(cat.color) : null;
             }
 
+            // Build pixel data once, apply to all canvases
+            const imageData = new ImageData(width, height);
+            const out = imageData.data;
             for (let i = 0; i < rawPixels.length; i++) {
                 const v = rawPixels[i];
                 const idx = i * 4;
-                if (v >= 1 && v <= 7 && colorLut[v] && this.qcLayerVisibility[v]) {
+                if (v >= 1 && v <= 7 && colorLut[v] && this.qcLayerVisibility[String(v)]) {
                     const c = colorLut[v];
                     out[idx]     = c.r;
                     out[idx + 1] = c.g;
@@ -585,12 +566,19 @@ createApp({
                 }
             }
 
-            ctx.putImageData(imageData, 0, 0);
+            for (const id of ['qcMaskCanvas', 'qcOverlayCanvas']) {
+                const canvas = document.getElementById(id);
+                if (!canvas) continue;
+                canvas.width  = width;
+                canvas.height = height;
+                canvas.getContext('2d').putImageData(imageData, 0, 0);
+            }
         },
 
         toggleQcLayer(categoryId) {
             this.qcLayerVisibility[categoryId] = !this.qcLayerVisibility[categoryId];
             this.redrawQcMask();
+            if (this.showQcStats && this.qcMaskStats) this.renderQcPieChart();
         },
 
         hexToRgb(hex) {
@@ -641,7 +629,7 @@ createApp({
             
             for (let i = 1; i <= 7; i++) {
                 const stat = this.qcMaskStats[i];
-                if (stat.count > 0) {  // Only include categories with pixels
+                if (stat.count > 0 && this.qcLayerVisibility[String(i)]) {
                     const category = this.config.qcMask.categories[i];
                     labels.push(category.name);
                     data.push(stat.percentage.toFixed(2));
@@ -704,7 +692,7 @@ createApp({
             this.currentSlideIndex = -1;
             this.qcMaskStats = null;
             this.qcRawPixels = null;
-            this.qcLayerVisibility = { 1: true, 2: true, 3: true, 4: true, 5: true, 6: true, 7: true };
+            this.qcLayerVisibility = { '1': true, '2': true, '3': true, '4': true, '5': true, '6': true, '7': true };
             
             // Destroy pie chart
             if (this.qcPieChart) {
@@ -1043,6 +1031,7 @@ createApp({
     watch: {
         heatmapAlpha() { this.updateHeatmap(); },
         showPatchHeatmap() { this.updateHeatmap(); },
+        showQcOverlay(val) { if (val) this.$nextTick(() => this.redrawQcMask()); },
     },
 
     mounted() {
