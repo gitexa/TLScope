@@ -119,7 +119,7 @@ const CONFIG = {
             csvPath: '/mnt/disks/ahaas-persistent-std-profile/data/metadata/reader_study/all_slides_reader_study.csv',
 
             thumbnailBasePath: '/mnt/disks/ahaas-persistent-std-profile/data/preprocessing',
-            qcMaskBasePath: '/path/to/profile_reader_study/qc_masks',          // TODO
+            qcMaskBasePath: '/mnt/disks/vanallenlab/profile/grand_qc/wsi-qc-skipped',
 
             resultsBasePath: '/mnt/disks/ahaas-persistent-std-tcga/results',
             analysisDir: 'analysis_profile_reader_study',

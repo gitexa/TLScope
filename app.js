@@ -19,6 +19,12 @@ createApp({
             viewer: null,
             wsiLoading: false,
             viewerZoom: 1.0,
+            heatmapData: null,
+            heatmapColors: null,
+            heatmapCanvas: null,
+            heatmapAlpha: 60,
+            showPatchHeatmap: false,
+            _heatmapRafPending: false,
             
             // Navigation
             allSlides: [],
@@ -43,6 +49,8 @@ createApp({
             
             // QC Mask visualization
             qcMaskStats: null,
+            qcRawPixels: null,      // raw category values per pixel for layer toggling
+            qcLayerVisibility: { 1: true, 2: true, 3: true, 4: true, 5: true, 6: true, 7: true },
             showQcLegend: CONFIG.qcMask.showLegendByDefault,
             showQcStats: CONFIG.qcMask.showStatsByDefault,
             qcPieChart: null,
@@ -510,21 +518,17 @@ createApp({
                     colorLut[v] = cat ? this.hexToRgb(cat.color) : null;
                 }
 
+                // Store raw category values for layer toggling
+                const rawPixels = new Uint8Array(data.length / 4);
                 for (let i = 0; i < data.length; i += 4) {
-                    // Grayscale PNG drawn to canvas: R=G=B=original_value
-                    // Use red channel as the mask category value
-                    const value = data[i];
+                    rawPixels[i / 4] = data[i]; // red channel = category value
+                }
+                this.qcRawPixels = { data: rawPixels, width: canvas.width, height: canvas.height };
 
-                    if (value >= 1 && value <= 7 && colorLut[value]) {
-                        stats[value].count++;
-                        const c = colorLut[value];
-                        data[i]     = c.r;
-                        data[i + 1] = c.g;
-                        data[i + 2] = c.b;
-                        data[i + 3] = 255;
-                    } else {
-                        data[i + 3] = 0; // transparent for value 0 / unknown
-                    }
+                // Count stats
+                for (let i = 0; i < rawPixels.length; i++) {
+                    const v = rawPixels[i];
+                    if (v >= 1 && v <= 7) stats[v].count++;
                 }
 
                 // Calculate percentages
@@ -535,7 +539,7 @@ createApp({
                 this.qcMaskStats = stats;
                 console.log('QC Mask stats:', stats);
 
-                ctx.putImageData(imageData, 0, 0);
+                this.redrawQcMask();
 
                 this.$nextTick(() => {
                     if (this.showQcStats) {
@@ -548,6 +552,47 @@ createApp({
             }
         },
         
+        redrawQcMask() {
+            if (!this.qcRawPixels) return;
+            const canvas = document.getElementById('qcMaskCanvas');
+            if (!canvas) return;
+
+            const { data: rawPixels, width, height } = this.qcRawPixels;
+            canvas.width  = width;
+            canvas.height = height;
+
+            const ctx = canvas.getContext('2d', { willReadFrequently: true });
+            const imageData = ctx.createImageData(width, height);
+            const out = imageData.data;
+
+            const colorLut = {};
+            for (let v = 1; v <= 7; v++) {
+                const cat = this.config.qcMask.categories[v];
+                colorLut[v] = cat ? this.hexToRgb(cat.color) : null;
+            }
+
+            for (let i = 0; i < rawPixels.length; i++) {
+                const v = rawPixels[i];
+                const idx = i * 4;
+                if (v >= 1 && v <= 7 && colorLut[v] && this.qcLayerVisibility[v]) {
+                    const c = colorLut[v];
+                    out[idx]     = c.r;
+                    out[idx + 1] = c.g;
+                    out[idx + 2] = c.b;
+                    out[idx + 3] = 255;
+                } else {
+                    out[idx + 3] = 0;
+                }
+            }
+
+            ctx.putImageData(imageData, 0, 0);
+        },
+
+        toggleQcLayer(categoryId) {
+            this.qcLayerVisibility[categoryId] = !this.qcLayerVisibility[categoryId];
+            this.redrawQcMask();
+        },
+
         hexToRgb(hex) {
             // Convert hex color to RGB
             const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
@@ -658,6 +703,8 @@ createApp({
             this.attentionMapInfo = null;
             this.currentSlideIndex = -1;
             this.qcMaskStats = null;
+            this.qcRawPixels = null;
+            this.qcLayerVisibility = { 1: true, 2: true, 3: true, 4: true, 5: true, 6: true, 7: true };
             
             // Destroy pie chart
             if (this.qcPieChart) {
@@ -670,6 +717,14 @@ createApp({
                 this.viewer.destroy();
                 this.viewer = null;
             }
+
+            // Clear heatmap
+            if (this.heatmapCanvas && this.heatmapCanvas.parentNode) {
+                this.heatmapCanvas.parentNode.removeChild(this.heatmapCanvas);
+            }
+            this.heatmapCanvas = null;
+            this.heatmapData = null;
+            this.showPatchHeatmap = false;
         },
         
         // Navigation methods
@@ -794,6 +849,7 @@ createApp({
                 this.viewer.addHandler('open', () => {
                     this.wsiLoading = false;
                     console.log('Viewer opened successfully');
+                    this.loadAttentionHeatmap();
                 });
                 
                 this.viewer.addHandler('tile-loaded', () => {
@@ -823,7 +879,11 @@ createApp({
                 // Add event listeners
                 this.viewer.addHandler('zoom', (event) => {
                     this.viewerZoom = event.zoom;
+                    this.updateHeatmap();
                 });
+
+                this.viewer.addHandler('pan', () => { this.updateHeatmap(); });
+                this.viewer.addHandler('resize', () => { this.updateHeatmap(); });
 
                 this.viewer.addHandler('open', () => {
                     this.wsiLoading = false;
@@ -849,9 +909,140 @@ createApp({
 
         toggleFullscreen() {
             if (!this.viewer) return;
-            
             this.viewer.setFullScreen(!this.viewer.isFullPage());
+        },
+
+        async loadAttentionHeatmap() {
+            const datasetConfig = this.currentDatasetConfig;
+            if (!datasetConfig.resultsBasePath || !this.slideData || !this.viewer) return;
+
+            const cancerTypeKey = datasetConfig.columnMapping.cancerType;
+            const sampleIdKey   = datasetConfig.columnMapping.sampleId;
+            const cancerType    = this.slideData[cancerTypeKey] || '';
+            const slideId       = this.slideData[sampleIdKey]   || '';
+            const experiment    = this.selectedExperiment || datasetConfig.defaultExperiment || '';
+            const analysisDir   = datasetConfig.analysisDir || '';
+
+            try {
+                const params = new URLSearchParams({ resultsBasePath: datasetConfig.resultsBasePath, experiment, analysisDir, cancerType, slideId });
+                const response = await fetch(`/api/attention-scores?${params}`);
+                if (!response.ok) return;
+                const data = await response.json();
+                if (!data.available) { console.log('Attention scores not available:', data.reason); return; }
+
+                this.heatmapData = data;
+                this._prepareHeatmapColors();
+                this.showPatchHeatmap = true;
+                this.drawHeatmap();
+            } catch (err) {
+                console.warn('Could not load attention scores:', err.message);
+            }
+        },
+
+        _prepareHeatmapColors() {
+            // Pre-compute per-patch RGBA colors once after data loads
+            const { scores } = this.heatmapData;
+            const colors = new Uint8Array(scores.length * 4);
+            for (let i = 0; i < scores.length; i++) {
+                const t = scores[i];
+                colors[i*4]   = Math.round(255 * Math.min(Math.max(1.5 - Math.abs(4*t - 3), 0), 1)); // R
+                colors[i*4+1] = Math.round(255 * Math.min(Math.max(1.5 - Math.abs(4*t - 2), 0), 1)); // G
+                colors[i*4+2] = Math.round(255 * Math.min(Math.max(1.5 - Math.abs(4*t - 1), 0), 1)); // B
+                colors[i*4+3] = 255; // A (controlled at draw time via globalAlpha)
+            }
+            this.heatmapColors = colors;
+        },
+
+        drawHeatmap() {
+            if (!this.heatmapData || !this.viewer || !this.showPatchHeatmap) return;
+
+            const { coords, patchSize } = this.heatmapData;
+            const colors    = this.heatmapColors;
+            const viewport  = this.viewer.viewport;
+            const tiledImage = this.viewer.world.getItemAt(0);
+            if (!tiledImage) return;
+
+            // Create canvas once, reuse on subsequent draws
+            const container = this.viewer.canvas;
+            const W = container.clientWidth;
+            const H = container.clientHeight;
+
+            if (!this.heatmapCanvas) {
+                const canvas = document.createElement('canvas');
+                canvas.style.cssText = 'position:absolute;top:0;left:0;pointer-events:none;';
+                container.parentElement.appendChild(canvas);
+                this.heatmapCanvas = canvas;
+            }
+
+            // Resize canvas only if container changed
+            if (this.heatmapCanvas.width !== W || this.heatmapCanvas.height !== H) {
+                this.heatmapCanvas.width  = W;
+                this.heatmapCanvas.height = H;
+            }
+
+            const ctx = this.heatmapCanvas.getContext('2d');
+            ctx.clearRect(0, 0, W, H);
+            ctx.globalAlpha = this.heatmapAlpha / 100;
+
+            // Compute patch screen size from first visible patch to decide render strategy
+            const p0vp = tiledImage.imageToViewportCoordinates(new OpenSeadragon.Point(0, 0));
+            const p1vp = tiledImage.imageToViewportCoordinates(new OpenSeadragon.Point(patchSize, 0));
+            const p0sc = viewport.viewportToViewerElementCoordinates(p0vp);
+            const p1sc = viewport.viewportToViewerElementCoordinates(p1vp);
+            const patchScreenSize = Math.abs(p1sc.x - p0sc.x);
+
+            if (patchScreenSize < 0.5) return; // Too zoomed out to see anything
+
+            // Compute viewport bounds in image coords for culling off-screen patches
+            const bounds = viewport.getBounds();
+            const tlImg  = tiledImage.viewportToImageCoordinates(new OpenSeadragon.Point(bounds.x, bounds.y));
+            const brImg  = tiledImage.viewportToImageCoordinates(new OpenSeadragon.Point(bounds.x + bounds.width, bounds.y + bounds.height));
+            const margin = patchSize * 2;
+            const xMin = tlImg.x - margin, xMax = brImg.x + margin;
+            const yMin = tlImg.y - margin, yMax = brImg.y + margin;
+
+            // Compute transform: image px → screen px
+            // Use a single affine transform derived from two reference points
+            const ref0sc = viewport.viewportToViewerElementCoordinates(
+                tiledImage.imageToViewportCoordinates(new OpenSeadragon.Point(0, 0)));
+            const scale  = patchScreenSize / patchSize;
+
+            for (let i = 0; i < coords.length; i++) {
+                const [x, y] = coords[i];
+
+                // Cull off-screen patches
+                if (x < xMin || x > xMax || y < yMin || y > yMax) continue;
+
+                const sx = ref0sc.x + x * scale;
+                const sy = ref0sc.y + y * scale;
+                const sw = patchScreenSize;
+
+                ctx.fillStyle = `rgb(${colors[i*4]},${colors[i*4+1]},${colors[i*4+2]})`;
+                ctx.fillRect(sx, sy, sw, sw);
+            }
+
+            ctx.globalAlpha = 1;
+        },
+
+        updateHeatmap() {
+            if (!this._heatmapRafPending) {
+                this._heatmapRafPending = true;
+                requestAnimationFrame(() => {
+                    this._heatmapRafPending = false;
+                    if (this.showPatchHeatmap && this.heatmapData) {
+                        this.drawHeatmap();
+                    } else if (!this.showPatchHeatmap && this.heatmapCanvas) {
+                        const ctx = this.heatmapCanvas.getContext('2d');
+                        ctx.clearRect(0, 0, this.heatmapCanvas.width, this.heatmapCanvas.height);
+                    }
+                });
+            }
         }
+    },
+
+    watch: {
+        heatmapAlpha() { this.updateHeatmap(); },
+        showPatchHeatmap() { this.updateHeatmap(); },
     },
 
     mounted() {

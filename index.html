@@ -519,6 +519,18 @@
             align-items: center;
             gap: 8px;
             font-size: 12px;
+            cursor: pointer;
+            padding: 4px 6px;
+            border-radius: 6px;
+            border: 1px solid transparent;
+            transition: background .1s, opacity .1s;
+            user-select: none;
+        }
+
+        .qc-legend-item:hover { background: #f0f0f0; }
+
+        .qc-legend-item.hidden {
+            opacity: 0.35;
         }
 
         .qc-color-box {
@@ -956,43 +968,6 @@
                 </div>
             </div>
 
-            <!-- WSI Viewer Section -->
-            <div v-if="slideData && slideData[currentDatasetConfig.columnMapping.filePath]" class="wsi-viewer-section">
-                <div class="section-title">Whole Slide Image Viewer</div>
-                
-                <div class="wsi-viewer-container">
-                    <div v-if="wsiLoading" class="wsi-loading">
-                        <div class="spinner"></div>
-                        <p>Loading whole slide image...</p>
-                    </div>
-                    <div id="openseadragon-viewer" style="width: 100%; height: 100%;"></div>
-                    <div v-if="viewer" class="fullscreen-btn" @click="toggleFullscreen" title="Toggle Fullscreen">
-                        ⛶
-                    </div>
-                </div>
-
-                <div class="viewer-controls">
-                    <button @click="initViewer" class="viewer-btn" :disabled="wsiLoading">
-                        {{ viewer ? 'Reload Viewer' : 'Load WSI Viewer' }}
-                    </button>
-                    <button v-if="viewer" @click="viewer.viewport.goHome()" class="viewer-btn">
-                        🏠 Reset View
-                    </button>
-                    <button v-if="viewer" @click="viewer.viewport.zoomBy(1.5)" class="viewer-btn">
-                        ➕ Zoom In
-                    </button>
-                    <button v-if="viewer" @click="viewer.viewport.zoomBy(0.67)" class="viewer-btn">
-                        ➖ Zoom Out
-                    </button>
-                    <div class="viewer-info">
-                        <strong>File:</strong> {{ slideData[currentDatasetConfig.columnMapping.filePath] ? slideData[currentDatasetConfig.columnMapping.filePath].split('/').pop() : 'N/A' }}
-                    </div>
-                    <div v-if="viewer" class="viewer-info">
-                        <strong>Zoom:</strong> {{ viewerZoom.toFixed(2) }}x
-                    </div>
-                </div>
-            </div>
-
             <!-- Images Section -->
             <div class="images-section">
                 <div class="section-title">Slide Images</div>
@@ -1039,11 +1014,18 @@
                                 </div>
                             </div>
                             
-                            <!-- Legend -->
+                            <!-- Legend + Layer Toggles -->
                             <div v-if="qcMaskPath && showQcLegend" class="qc-legend">
-                                <div class="qc-legend-title">🏷️ Category Legend</div>
+                                <div class="qc-legend-title">Layer Visibility — click to toggle</div>
                                 <div class="qc-legend-items">
-                                    <div v-for="(category, key) in config.qcMask.categories" :key="key" class="qc-legend-item">
+                                    <div
+                                        v-for="(category, key) in config.qcMask.categories"
+                                        :key="key"
+                                        class="qc-legend-item"
+                                        :class="{ hidden: !qcLayerVisibility[key] }"
+                                        @click="toggleQcLayer(key)"
+                                        :title="qcLayerVisibility[key] ? 'Click to hide' : 'Click to show'"
+                                    >
                                         <div class="qc-color-box" :style="{ backgroundColor: category.color }"></div>
                                         <div>
                                             <div class="qc-category-name">{{ category.name }}</div>
@@ -1236,10 +1218,58 @@
                 </div><!-- end experiment-section-body -->
             </div>
 
+            <!-- WSI Viewer Section -->
+            <div v-if="slideData && slideData[currentDatasetConfig.columnMapping.filePath]" class="wsi-viewer-section">
+                <div class="section-title">Whole Slide Image Viewer</div>
+
+                <div class="wsi-viewer-container">
+                    <div v-if="wsiLoading" class="wsi-loading">
+                        <div class="spinner"></div>
+                        <p>Loading whole slide image...</p>
+                    </div>
+                    <div id="openseadragon-viewer" style="width: 100%; height: 100%;"></div>
+                    <div v-if="viewer" class="fullscreen-btn" @click="toggleFullscreen" title="Toggle Fullscreen">
+                        ⛶
+                    </div>
+                </div>
+
+                <div class="viewer-controls">
+                    <button @click="initViewer" class="viewer-btn" :disabled="wsiLoading">
+                        {{ viewer ? 'Reload Viewer' : 'Load WSI Viewer' }}
+                    </button>
+                    <button v-if="viewer" @click="viewer.viewport.goHome()" class="viewer-btn">
+                        🏠 Reset View
+                    </button>
+                    <button v-if="viewer" @click="viewer.viewport.zoomBy(1.5)" class="viewer-btn">
+                        ➕ Zoom In
+                    </button>
+                    <button v-if="viewer" @click="viewer.viewport.zoomBy(0.67)" class="viewer-btn">
+                        ➖ Zoom Out
+                    </button>
+                    <div class="viewer-info">
+                        <strong>File:</strong> {{ slideData[currentDatasetConfig.columnMapping.filePath] ? slideData[currentDatasetConfig.columnMapping.filePath].split('/').pop() : 'N/A' }}
+                    </div>
+                    <div v-if="viewer" class="viewer-info">
+                        <strong>Zoom:</strong> {{ viewerZoom.toFixed(2) }}x
+                    </div>
+                    <div v-if="viewer && heatmapData" class="overlay-controls" style="margin-left: auto;">
+                        <label style="display:flex; align-items:center; gap:8px; font-size:13px;">
+                            <input type="checkbox" v-model="showPatchHeatmap">
+                            Attention Heatmap
+                        </label>
+                        <div v-if="showPatchHeatmap" class="opacity-control">
+                            <label>Opacity:</label>
+                            <input type="range" min="0" max="100" v-model="heatmapAlpha" class="opacity-slider">
+                            <span>{{ heatmapAlpha }}%</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
         </div>
     </div>
 
-    <script src="config.js?v=20260309g"></script>
-    <script src="app.js?v=20260309g"></script>
+    <script src="config.js?v=20260309m"></script>
+    <script src="app.js?v=20260309m"></script>
 </body>
 </html>

@@ -154,6 +154,11 @@ class EnhancedSlideHandler(SimpleHTTPRequestHandler):
             self.serve_predictions(parsed_path)
             return
 
+        # Handle attention scores request
+        elif path.startswith("/api/attention-scores"):
+            self.serve_attention_scores(parsed_path)
+            return
+
         # Handle other requests normally
         else:
             # Check if file exists
@@ -269,6 +274,53 @@ class EnhancedSlideHandler(SimpleHTTPRequestHandler):
             self.send_json({"available": False, "reason": "Slide not found in predictions"})
         except Exception as e:
             print(f"❌ [DEBUG] Error in predictions: {e}")
+            self.send_error(500, str(e))
+
+    def serve_attention_scores(self, parsed_path):
+        """Load attention.npy + coords.npy and return normalized scores as JSON"""
+        try:
+            import numpy as np
+            query_params = parse_qs(parsed_path.query)
+            results_base = unquote(query_params.get("resultsBasePath", [None])[0] or "")
+            experiment   = unquote(query_params.get("experiment",      [None])[0] or "")
+            analysis_dir = unquote(query_params.get("analysisDir",     [None])[0] or "")
+            cancer_type  = unquote(query_params.get("cancerType",      [None])[0] or "")
+            slide_id     = unquote(query_params.get("slideId",         [None])[0] or "")
+
+            if not all([results_base, experiment, analysis_dir, cancer_type, slide_id]):
+                self.send_json({"available": False, "reason": "Missing parameters"})
+                return
+
+            slide_dir = os.path.join(results_base, experiment, analysis_dir,
+                                     "attention_maps", cancer_type, slide_id)
+
+            attention_path = os.path.join(slide_dir, "attention.npy")
+            coords_path    = os.path.join(slide_dir, "coords.npy")
+
+            if not os.path.isfile(attention_path) or not os.path.isfile(coords_path):
+                self.send_json({"available": False, "reason": "attention.npy or coords.npy not found"})
+                return
+
+            scores = np.load(attention_path).flatten().astype(float)
+            coords = np.load(coords_path)
+
+            # Normalize scores to [0, 1] using percentile clipping for better contrast
+            p1  = float(np.percentile(scores, 1))
+            p99 = float(np.percentile(scores, 99))
+            if p99 > p1:
+                scores = np.clip((scores - p1) / (p99 - p1), 0.0, 1.0)
+            else:
+                scores = np.zeros_like(scores)
+
+            self.send_json({
+                "available": True,
+                "coords": coords.tolist(),
+                "scores": scores.tolist(),
+                "patchSize": 256,
+            })
+        except Exception as e:
+            print(f"❌ [DEBUG] Error in attention-scores: {e}")
+            import traceback; traceback.print_exc()
             self.send_error(500, str(e))
 
     def send_json(self, data):
