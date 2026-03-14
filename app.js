@@ -25,6 +25,12 @@ createApp({
             heatmapAlpha: 60,
             showPatchHeatmap: false,
             _heatmapRafPending: false,
+
+            // QC mask overlay in WSI viewer
+            qcWsiCanvas: null,
+            showQcWsiOverlay: false,
+            qcWsiOpacity: 50,
+            _qcWsiRafPending: false,
             
             // Navigation
             allSlides: [],
@@ -42,6 +48,13 @@ createApp({
             showExperimentSection: false,
             experimentPredictions: null,
             experimentPredictionsLoading: false,
+
+            // Experiment-based slide navigator
+            allPredictions: null,           // all rows from predictions CSV
+            allPredictionsLoading: false,
+            expNavCancerType: '',           // selected cancer type filter
+            expNavSlideId: '',              // currently loaded slide id (for row highlight)
+            expNavTopN: 10,                 // how many worst/best to show
 
             // Cancer type filtering
             selectedCancerType: '',
@@ -83,6 +96,70 @@ createApp({
             if (!this.hasSampleIdList) return [];
             const key = this.currentDatasetConfig.columnMapping.sampleId;
             return this.filteredSlides.map(s => s[key]).filter(Boolean);
+        },
+
+        // Join allPredictions with allSlides to get cancer type, then sort by mismatch
+        expNavRows() {
+            if (!this.allPredictions || !this.allPredictions.length) return [];
+
+            const datasetConfig = this.currentDatasetConfig;
+            const sampleIdKey   = datasetConfig.columnMapping.sampleId;
+            const cancerTypeKey = datasetConfig.columnMapping.cancerType;
+
+            // Build a lookup: slideId -> cancerType from the main CSV
+            const cancerTypeMap = {};
+            for (const slide of this.allSlides) {
+                const id = slide[sampleIdKey];
+                if (id) cancerTypeMap[id] = slide[cancerTypeKey] || '';
+            }
+
+            // Detect slide id column in predictions
+            const slideIdCols = ['slide_id', 'SAMPLE_ACCESSION', 'sample_id', 'case'];
+
+            const rows = this.allPredictions.map(row => {
+                let slideId = '';
+                for (const col of slideIdCols) {
+                    if (row[col]) { slideId = row[col]; break; }
+                }
+                const cancerType = cancerTypeMap[slideId] || row['cancer_type'] || row['type'] || '';
+
+                // Regression mismatch: |TLS_count_consensus - pred_num_tls|
+                const consensus = parseFloat(row['TLS_count_consensus']);
+                const pred      = parseFloat(row['pred_num_tls'] ?? row['pred']);
+                const mismatch  = (!isNaN(consensus) && !isNaN(pred))
+                    ? Math.abs(consensus - pred)
+                    : null;
+
+                return { slideId, cancerType, mismatch, row };
+            }).filter(r => r.slideId);
+
+            // Filter by cancer type
+            const filtered = this.expNavCancerType
+                ? rows.filter(r => r.cancerType === this.expNavCancerType)
+                : rows;
+
+            // Sort: slides with mismatch data first (descending), then alphabetical
+            return [...filtered].sort((a, b) => {
+                if (a.mismatch !== null && b.mismatch !== null) return b.mismatch - a.mismatch;
+                if (a.mismatch !== null) return -1;
+                if (b.mismatch !== null) return 1;
+                return a.slideId.localeCompare(b.slideId);
+            });
+        },
+
+        expNavCancerTypes() {
+            if (!this.allPredictions || !this.allPredictions.length) return [];
+            const set = new Set(this.expNavRows.map(r => r.cancerType).filter(Boolean));
+            return Array.from(set).sort();
+        },
+
+        expNavWorst() {
+            return this.expNavRows.filter(r => r.mismatch !== null).slice(0, this.expNavTopN);
+        },
+
+        expNavBest() {
+            const withMismatch = this.expNavRows.filter(r => r.mismatch !== null);
+            return withMismatch.slice(-this.expNavTopN).reverse();
         },
     },
     
@@ -166,6 +243,43 @@ createApp({
                 this.loadAttentionMapInfo();
                 this.loadExperimentPredictions();
             }
+            this.allPredictions = null;
+            this.expNavCancerType = '';
+            this.expNavSlideId = '';
+            if (this.showExperimentSection) this.loadAllPredictions();
+        },
+
+        async loadAllPredictions() {
+            const datasetConfig = this.currentDatasetConfig;
+            if (!datasetConfig.resultsBasePath || !datasetConfig.predictionsFile) return;
+            const experiment = this.selectedExperiment || datasetConfig.defaultExperiment || '';
+            const analysisDir = datasetConfig.analysisDir || '';
+
+            this.allPredictionsLoading = true;
+            try {
+                const params = new URLSearchParams({
+                    resultsBasePath: datasetConfig.resultsBasePath,
+                    experiment,
+                    analysisDir,
+                    predictionsFile: datasetConfig.predictionsFile,
+                });
+                const response = await fetch(`/api/all-predictions?${params}`);
+                if (response.ok) {
+                    const data = await response.json();
+                    this.allPredictions = data.available ? data.rows : [];
+                }
+            } catch (err) {
+                console.warn('Could not load all predictions:', err.message);
+                this.allPredictions = [];
+            } finally {
+                this.allPredictionsLoading = false;
+            }
+        },
+
+        expNavLoad(row) {
+            this.expNavSlideId = row.slideId;
+            this.searchId = row.slideId;
+            this.loadSlide();
         },
 
         async loadAttentionMapInfo() {
@@ -713,6 +827,12 @@ createApp({
             this.heatmapCanvas = null;
             this.heatmapData = null;
             this.showPatchHeatmap = false;
+
+            // Clear QC WSI overlay
+            if (this.qcWsiCanvas && this.qcWsiCanvas.parentNode) {
+                this.qcWsiCanvas.parentNode.removeChild(this.qcWsiCanvas);
+            }
+            this.qcWsiCanvas = null;
         },
         
         // Navigation methods
@@ -724,21 +844,25 @@ createApp({
             return this.currentSlideIndex >= 0 && this.currentSlideIndex < this.filteredSlides.length - 1;
         },
         
-        goToPrevious() {
+        async goToPrevious() {
             if (this.canGoPrevious()) {
                 const prevSlide = this.filteredSlides[this.currentSlideIndex - 1];
                 const sampleIdKey = this.currentDatasetConfig.columnMapping.sampleId;
                 this.searchId = prevSlide[sampleIdKey];
-                this.loadSlide();
+                const hadViewer = !!this.viewer;
+                await this.loadSlide();
+                if (hadViewer) this.initViewer();
             }
         },
-        
-        goToNext() {
+
+        async goToNext() {
             if (this.canGoNext()) {
                 const nextSlide = this.filteredSlides[this.currentSlideIndex + 1];
                 const sampleIdKey = this.currentDatasetConfig.columnMapping.sampleId;
                 this.searchId = nextSlide[sampleIdKey];
-                this.loadSlide();
+                const hadViewer = !!this.viewer;
+                await this.loadSlide();
+                if (hadViewer) this.initViewer();
             }
         },
         
@@ -766,7 +890,20 @@ createApp({
 
             this.wsiLoading = true;
 
-            // Destroy existing viewer
+            // Destroy existing viewer and clear overlay canvases
+            if (this.heatmapCanvas && this.heatmapCanvas.parentNode) {
+                this.heatmapCanvas.parentNode.removeChild(this.heatmapCanvas);
+            }
+            this.heatmapCanvas = null;
+            this.heatmapData = null;
+            this.heatmapColors = null;
+            this.showPatchHeatmap = false;
+
+            if (this.qcWsiCanvas && this.qcWsiCanvas.parentNode) {
+                this.qcWsiCanvas.parentNode.removeChild(this.qcWsiCanvas);
+            }
+            this.qcWsiCanvas = null;
+
             if (this.viewer) {
                 this.viewer.destroy();
                 this.viewer = null;
@@ -838,6 +975,7 @@ createApp({
                     this.wsiLoading = false;
                     console.log('Viewer opened successfully');
                     this.loadAttentionHeatmap();
+                    this.updateQcWsiOverlay();
                 });
                 
                 this.viewer.addHandler('tile-loaded', () => {
@@ -868,10 +1006,11 @@ createApp({
                 this.viewer.addHandler('zoom', (event) => {
                     this.viewerZoom = event.zoom;
                     this.updateHeatmap();
+                    this.updateQcWsiOverlay();
                 });
 
-                this.viewer.addHandler('pan', () => { this.updateHeatmap(); });
-                this.viewer.addHandler('resize', () => { this.updateHeatmap(); });
+                this.viewer.addHandler('pan', () => { this.updateHeatmap(); this.updateQcWsiOverlay(); });
+                this.viewer.addHandler('resize', () => { this.updateHeatmap(); this.updateQcWsiOverlay(); });
 
                 this.viewer.addHandler('open', () => {
                     this.wsiLoading = false;
@@ -1025,13 +1164,109 @@ createApp({
                     }
                 });
             }
-        }
+        },
+
+        drawQcWsiOverlay() {
+            if (!this.viewer || !this.qcRawPixels || !this.showQcWsiOverlay) return;
+
+            const viewport   = this.viewer.viewport;
+            const tiledImage = this.viewer.world.getItemAt(0);
+            if (!tiledImage) return;
+
+            const container = this.viewer.canvas;
+            const W = container.clientWidth;
+            const H = container.clientHeight;
+
+            // Create overlay canvas once
+            if (!this.qcWsiCanvas) {
+                const canvas = document.createElement('canvas');
+                canvas.style.cssText = 'position:absolute;top:0;left:0;pointer-events:none;';
+                container.parentElement.appendChild(canvas);
+                this.qcWsiCanvas = canvas;
+            }
+
+            if (this.qcWsiCanvas.width !== W || this.qcWsiCanvas.height !== H) {
+                this.qcWsiCanvas.width  = W;
+                this.qcWsiCanvas.height = H;
+            }
+
+            const ctx = this.qcWsiCanvas.getContext('2d');
+            ctx.clearRect(0, 0, W, H);
+
+            // Map QC mask image coords (same aspect ratio as slide) to screen coords.
+            // The QC mask covers the entire slide, so we map [0,0]-[maskW,maskH] to slide image space.
+            const { data: rawPixels, width: maskW, height: maskH } = this.qcRawPixels;
+
+            // Get screen coords of the slide's top-left and bottom-right corners
+            const tlVp = tiledImage.imageToViewportCoordinates(new OpenSeadragon.Point(0, 0));
+            const brVp = tiledImage.imageToViewportCoordinates(new OpenSeadragon.Point(
+                tiledImage.source.width, tiledImage.source.height));
+            const tlSc = viewport.viewportToViewerElementCoordinates(tlVp);
+            const brSc = viewport.viewportToViewerElementCoordinates(brVp);
+
+            const slideScreenW = brSc.x - tlSc.x;
+            const slideScreenH = brSc.y - tlSc.y;
+
+            // Build an ImageData from qcRawPixels with the colorized QC mask
+            const colorLut = {};
+            for (let v = 1; v <= 7; v++) {
+                const cat = this.config.qcMask.categories[v];
+                colorLut[v] = cat ? this.hexToRgb(cat.color) : null;
+            }
+
+            const maskImageData = new ImageData(maskW, maskH);
+            const out = maskImageData.data;
+            for (let i = 0; i < rawPixels.length; i++) {
+                const v = rawPixels[i];
+                const idx = i * 4;
+                if (v >= 1 && v <= 7 && colorLut[v] && this.qcLayerVisibility[String(v)]) {
+                    const c = colorLut[v];
+                    out[idx]     = c.r;
+                    out[idx + 1] = c.g;
+                    out[idx + 2] = c.b;
+                    out[idx + 3] = 255;
+                } else {
+                    out[idx + 3] = 0;
+                }
+            }
+
+            // Draw via an offscreen canvas so we can scale it
+            const offscreen = new OffscreenCanvas(maskW, maskH);
+            offscreen.getContext('2d').putImageData(maskImageData, 0, 0);
+
+            ctx.globalAlpha = this.qcWsiOpacity / 100;
+            ctx.drawImage(offscreen, tlSc.x, tlSc.y, slideScreenW, slideScreenH);
+            ctx.globalAlpha = 1;
+        },
+
+        updateQcWsiOverlay() {
+            if (!this._qcWsiRafPending) {
+                this._qcWsiRafPending = true;
+                requestAnimationFrame(() => {
+                    this._qcWsiRafPending = false;
+                    if (this.showQcWsiOverlay && this.qcRawPixels) {
+                        this.drawQcWsiOverlay();
+                    } else if (this.qcWsiCanvas) {
+                        const ctx = this.qcWsiCanvas.getContext('2d');
+                        ctx.clearRect(0, 0, this.qcWsiCanvas.width, this.qcWsiCanvas.height);
+                    }
+                });
+            }
+        },
     },
 
     watch: {
         heatmapAlpha() { this.updateHeatmap(); },
         showPatchHeatmap() { this.updateHeatmap(); },
         showQcOverlay(val) { if (val) this.$nextTick(() => this.redrawQcMask()); },
+        showQcWsiOverlay() { this.updateQcWsiOverlay(); },
+        qcWsiOpacity() { this.updateQcWsiOverlay(); },
+        qcLayerVisibility: { deep: true, handler() { this.updateQcWsiOverlay(); } },
+        showExperimentSection(val) {
+            if (val && !this.allPredictions && !this.allPredictionsLoading) {
+                this.loadAllPredictions();
+            }
+        },
     },
 
     mounted() {

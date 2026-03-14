@@ -4,6 +4,7 @@ Enhanced slide viewer server with OpenSlide DZI support
 """
 
 from http.server import HTTPServer, SimpleHTTPRequestHandler
+from socketserver import ThreadingMixIn
 import os
 import sys
 import json
@@ -162,6 +163,11 @@ class EnhancedSlideHandler(SimpleHTTPRequestHandler):
         # Handle QC mask (downsampled) request
         elif path.startswith("/api/qc-mask"):
             self.serve_qc_mask(parsed_path)
+            return
+
+        # Handle all-predictions request (full CSV for experiment-based navigation)
+        elif path.startswith("/api/all-predictions"):
+            self.serve_all_predictions(parsed_path)
             return
 
         # Handle other requests normally
@@ -343,17 +349,22 @@ class EnhancedSlideHandler(SimpleHTTPRequestHandler):
                 self.send_error(404, "Mask not found")
                 return
 
+            # Use draft() to decode at reduced resolution without loading full image
             img = Image.open(mask_path)
             w, h = img.size
 
-            # Downsample so longest side <= max_dim
             scale = min(max_dim / w, max_dim / h, 1.0)
             if scale < 1.0:
                 new_w = max(1, int(w * scale))
                 new_h = max(1, int(h * scale))
+                # draft() hints to PIL to decode at a reduced size (only works for JPEG/some formats)
+                img.draft(img.mode, (new_w, new_h))
                 img = img.resize((new_w, new_h), Image.NEAREST)
 
             arr = np.array(img)
+            # If multi-channel (RGB/RGBA), take the first channel as the category value
+            if arr.ndim == 3:
+                arr = arr[:, :, 0]
             raw_mode = query_params.get("raw", ["0"])[0] == "1"
 
             if raw_mode:
@@ -388,6 +399,36 @@ class EnhancedSlideHandler(SimpleHTTPRequestHandler):
         except Exception as e:
             print(f"❌ [DEBUG] Error in qc-mask: {e}")
             import traceback; traceback.print_exc()
+            self.send_error(500, str(e))
+
+    def serve_all_predictions(self, parsed_path):
+        """Return all rows from a predictions CSV for experiment-based slide navigation"""
+        try:
+            import csv
+            query_params = parse_qs(parsed_path.query)
+            results_base  = unquote(query_params.get("resultsBasePath", [None])[0] or "")
+            experiment    = unquote(query_params.get("experiment",      [None])[0] or "")
+            analysis_dir  = unquote(query_params.get("analysisDir",     [None])[0] or "")
+            pred_file     = unquote(query_params.get("predictionsFile", [None])[0] or "")
+
+            if not all([results_base, experiment, analysis_dir, pred_file]):
+                self.send_json({"available": False, "reason": "Missing parameters"})
+                return
+
+            csv_path = os.path.join(results_base, experiment, analysis_dir, "predictions", pred_file)
+            if not os.path.isfile(csv_path):
+                self.send_json({"available": False, "reason": "Predictions file not found"})
+                return
+
+            rows = []
+            with open(csv_path, newline="", encoding="utf-8") as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    rows.append(dict(row))
+
+            self.send_json({"available": True, "rows": rows})
+        except Exception as e:
+            print(f"❌ [DEBUG] Error in all-predictions: {e}")
             self.send_error(500, str(e))
 
     def send_json(self, data):
@@ -645,8 +686,11 @@ def run_server(port=8080, directory=None):
     if directory:
         os.chdir(directory)
 
+    class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
+        daemon_threads = True
+
     server_address = ("", port)
-    httpd = HTTPServer(server_address, EnhancedSlideHandler)
+    httpd = ThreadedHTTPServer(server_address, EnhancedSlideHandler)
 
     print("=" * 70)
     print("🔬 Enhanced Pathology Slide Viewer Server")

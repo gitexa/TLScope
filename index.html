@@ -649,6 +649,87 @@
             margin-bottom: 20px;
         }
 
+        .exp-nav-section {
+            background: #f8faff;
+            border: 1px solid #dbeafe;
+            border-radius: 10px;
+            padding: 14px 16px;
+            margin-bottom: 20px;
+        }
+
+        .exp-nav-title {
+            font-size: 12px;
+            font-weight: 700;
+            color: #3b82f6;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 10px;
+        }
+
+        .exp-nav-controls {
+            display: flex;
+            align-items: flex-end;
+            gap: 10px;
+            flex-wrap: wrap;
+            margin-bottom: 12px;
+        }
+
+        .exp-nav-tables {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+        }
+
+        .exp-nav-table-wrap { }
+
+        .exp-nav-table-label {
+            font-size: 11px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            margin-bottom: 5px;
+        }
+
+        .exp-nav-table-label.worst { color: #dc2626; }
+        .exp-nav-table-label.best  { color: #16a34a; }
+
+        .exp-nav-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 12px;
+        }
+
+        .exp-nav-table th {
+            background: #eff6ff;
+            color: #374151;
+            font-weight: 600;
+            padding: 5px 8px;
+            text-align: left;
+            border-bottom: 1px solid #dbeafe;
+        }
+
+        .exp-nav-table td {
+            padding: 5px 8px;
+            border-bottom: 1px solid #f0f4ff;
+            color: #374151;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 160px;
+        }
+
+        .exp-nav-table tr:last-child td { border-bottom: none; }
+
+        .exp-nav-table tr.active td { background: #dbeafe; font-weight: 600; }
+
+        .exp-nav-table tr:not(.active):hover td {
+            background: #eff6ff;
+            cursor: pointer;
+        }
+
+        .exp-nav-delta-worst { color: #dc2626; font-weight: 600; }
+        .exp-nav-delta-best  { color: #16a34a; font-weight: 600; }
+
         .attention-loading {
             display: flex;
             align-items: center;
@@ -1103,6 +1184,77 @@
                 </div>
 
                 <div v-if="showExperimentSection" class="experiment-section-body">
+
+                    <!-- Experiment-based slide navigator -->
+                    <div class="exp-nav-section">
+                        <div class="exp-nav-title">Navigate by Experiment Results</div>
+                        <div v-if="allPredictionsLoading" style="font-size:13px; color:#6b7280;">Loading predictions…</div>
+                        <div v-else-if="allPredictions !== null && allPredictions.length === 0" style="font-size:13px; color:#9ca3af;">No predictions available for this experiment.</div>
+                        <div v-else-if="allPredictions !== null">
+                            <div class="exp-nav-controls">
+                                <div class="control-group">
+                                    <span class="control-label">Cancer Type</span>
+                                    <select v-model="expNavCancerType" class="control-select">
+                                        <option value="">All</option>
+                                        <option v-for="ct in expNavCancerTypes" :key="ct" :value="ct">{{ ct }}</option>
+                                    </select>
+                                </div>
+                                <div class="control-group">
+                                    <span class="control-label">Show top N</span>
+                                    <select v-model="expNavTopN" class="control-select" style="width:70px;">
+                                        <option :value="5">5</option>
+                                        <option :value="10">10</option>
+                                        <option :value="20">20</option>
+                                        <option :value="50">50</option>
+                                    </select>
+                                </div>
+                                <div v-if="expNavRows.length" style="font-size:12px; color:#6b7280; align-self:center;">
+                                    {{ expNavRows.filter(r => r.mismatch !== null).length }} slides with mismatch data
+                                </div>
+                            </div>
+                            <div class="exp-nav-tables">
+                                <!-- Worst: highest mismatch -->
+                                <div class="exp-nav-table-wrap">
+                                    <div class="exp-nav-table-label worst">Worst (over-/under-predicted)</div>
+                                    <table class="exp-nav-table">
+                                        <thead><tr><th>#</th><th>Slide ID</th><th>Consensus</th><th>Pred</th><th>Δ</th></tr></thead>
+                                        <tbody>
+                                            <tr v-for="(r, i) in expNavWorst" :key="r.slideId"
+                                                :class="{ active: r.slideId === expNavSlideId }"
+                                                @click="expNavLoad(r)">
+                                                <td>{{ i + 1 }}</td>
+                                                <td :title="r.slideId">{{ r.slideId }}</td>
+                                                <td>{{ r.row['TLS_count_consensus'] ?? '—' }}</td>
+                                                <td>{{ r.row['pred_num_tls'] ?? r.row['pred'] ?? '—' }}</td>
+                                                <td class="exp-nav-delta-worst">{{ r.mismatch !== null ? r.mismatch.toFixed(1) : '—' }}</td>
+                                            </tr>
+                                            <tr v-if="!expNavWorst.length"><td colspan="5" style="color:#9ca3af; text-align:center;">No data</td></tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                                <!-- Best: lowest mismatch (among slides that have mismatch data) -->
+                                <div class="exp-nav-table-wrap">
+                                    <div class="exp-nav-table-label best">Best (closest to consensus)</div>
+                                    <table class="exp-nav-table">
+                                        <thead><tr><th>#</th><th>Slide ID</th><th>Consensus</th><th>Pred</th><th>Δ</th></tr></thead>
+                                        <tbody>
+                                            <tr v-for="(r, i) in expNavBest" :key="r.slideId"
+                                                :class="{ active: r.slideId === expNavSlideId }"
+                                                @click="expNavLoad(r)">
+                                                <td>{{ i + 1 }}</td>
+                                                <td :title="r.slideId">{{ r.slideId }}</td>
+                                                <td>{{ r.row['TLS_count_consensus'] ?? '—' }}</td>
+                                                <td>{{ r.row['pred_num_tls'] ?? r.row['pred'] ?? '—' }}</td>
+                                                <td class="exp-nav-delta-best">{{ r.mismatch !== null ? r.mismatch.toFixed(1) : '—' }}</td>
+                                            </tr>
+                                            <tr v-if="!expNavBest.length"><td colspan="5" style="color:#9ca3af; text-align:center;">No data</td></tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
                     <!-- Experiment selector -->
                     <div class="experiment-selector-row">
                         <div class="control-group">
@@ -1251,15 +1403,35 @@
                     <div v-if="viewer" class="viewer-info">
                         <strong>Zoom:</strong> {{ viewerZoom.toFixed(2) }}x
                     </div>
-                    <div v-if="viewer && heatmapData" class="overlay-controls" style="margin-left: auto;">
-                        <label style="display:flex; align-items:center; gap:8px; font-size:13px;">
-                            <input type="checkbox" v-model="showPatchHeatmap">
-                            Attention Heatmap
-                        </label>
-                        <div v-if="showPatchHeatmap" class="opacity-control">
-                            <label>Opacity:</label>
-                            <input type="range" min="0" max="100" v-model="heatmapAlpha" class="opacity-slider">
-                            <span>{{ heatmapAlpha }}%</span>
+                    <div v-if="viewer" class="overlay-controls" style="margin-left: auto; display:flex; gap:16px; align-items:center;">
+                        <div v-if="heatmapData">
+                            <label style="display:flex; align-items:center; gap:8px; font-size:13px;">
+                                <input type="checkbox" v-model="showPatchHeatmap">
+                                Attention Heatmap
+                            </label>
+                            <div v-if="showPatchHeatmap" class="opacity-control">
+                                <label>Opacity:</label>
+                                <input type="range" min="0" max="100" v-model="heatmapAlpha" class="opacity-slider">
+                                <span>{{ heatmapAlpha }}%</span>
+                            </div>
+                        </div>
+                        <div v-if="qcRawPixels">
+                            <label style="display:flex; align-items:center; gap:8px; font-size:13px;">
+                                <input type="checkbox" v-model="showQcWsiOverlay">
+                                QC Mask
+                            </label>
+                            <div v-if="showQcWsiOverlay" class="opacity-control">
+                                <label>Opacity:</label>
+                                <input type="range" min="0" max="100" v-model="qcWsiOpacity" class="opacity-slider">
+                                <span>{{ qcWsiOpacity }}%</span>
+                            </div>
+                            <div v-if="showQcWsiOverlay" style="display:flex; flex-wrap:wrap; gap:6px; margin-top:6px;">
+                                <div v-for="(cat, id) in config.qcMask.categories" :key="id"
+                                     style="display:flex; align-items:center; gap:4px; font-size:11px; color:#374151; white-space:nowrap;">
+                                    <span :style="{ width:'10px', height:'10px', borderRadius:'2px', background: cat.color, border:'1px solid #ccc', display:'inline-block', flexShrink:0 }"></span>
+                                    <span><strong>{{ cat.name }}</strong> — {{ cat.description }}</span>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -1268,7 +1440,7 @@
         </div>
     </div>
 
-    <script src="config.js?v=20260309q"></script>
-    <script src="app.js?v=20260309q"></script>
+    <script src="config.js?v=20260313r"></script>
+    <script src="app.js?v=20260313r"></script>
 </body>
 </html>

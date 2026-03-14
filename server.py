@@ -68,6 +68,11 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             self.serve_predictions(parsed_path)
             return
 
+        # Handle all-predictions request (full CSV for experiment-based navigation)
+        if path.startswith("/api/all-predictions"):
+            self.serve_all_predictions(parsed_path)
+            return
+
         # Translate path to see what file we're looking for
         translated_path = self.translate_path(self.path)
         print(f"   [do_GET] Translated to: {translated_path}")
@@ -182,6 +187,36 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             self.send_json({"available": False, "reason": "Slide not found in predictions"})
         except Exception as e:
             print(f"❌ [DEBUG] Error in predictions: {e}")
+            self.send_error(500, str(e))
+
+    def serve_all_predictions(self, parsed_path):
+        """Return all rows from a predictions CSV for experiment-based slide navigation"""
+        try:
+            import csv
+            query_params = parse_qs(parsed_path.query)
+            results_base  = unquote(query_params.get("resultsBasePath", [None])[0] or "")
+            experiment    = unquote(query_params.get("experiment",      [None])[0] or "")
+            analysis_dir  = unquote(query_params.get("analysisDir",     [None])[0] or "")
+            pred_file     = unquote(query_params.get("predictionsFile", [None])[0] or "")
+
+            if not all([results_base, experiment, analysis_dir, pred_file]):
+                self.send_json({"available": False, "reason": "Missing parameters"})
+                return
+
+            csv_path = os.path.join(results_base, experiment, analysis_dir, "predictions", pred_file)
+            if not os.path.isfile(csv_path):
+                self.send_json({"available": False, "reason": "Predictions file not found", "path": csv_path})
+                return
+
+            rows = []
+            with open(csv_path, newline="", encoding="utf-8") as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    rows.append(dict(row))
+
+            self.send_json({"available": True, "rows": rows})
+        except Exception as e:
+            print(f"❌ [DEBUG] Error in all-predictions: {e}")
             self.send_error(500, str(e))
 
     def send_json(self, data):
