@@ -923,18 +923,7 @@ createApp({
                 this.viewer = OpenSeadragon({
                     id: "openseadragon-viewer",
                     prefixUrl: "vendor/openseadragon-images/",
-                    
-                    // Tile source using our DZI server
-                    tileSources: {
-                        Image: {
-                            xmlns: "http://schemas.microsoft.com/deepzoom/2008",
-                            Url: `/dzi/slide_files/?path=${encodedSlidePath}`,
-                            Format: "jpeg",
-                            Overlap: "1",
-                            TileSize: "254"
-                        }
-                    },
-                    
+
                     // Viewer settings
                     showNavigator: true,
                     navigatorPosition: "BOTTOM_RIGHT",
