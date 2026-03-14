@@ -922,7 +922,7 @@ createApp({
                 // Initialize OpenSeadragon viewer
                 this.viewer = OpenSeadragon({
                     id: "openseadragon-viewer",
-                    prefixUrl: "https://cdn.jsdelivr.net/npm/openseadragon@4.1.0/build/openseadragon/images/",
+                    prefixUrl: "vendor/openseadragon-images/",
                     
                     // Tile source using our DZI server
                     tileSources: {
